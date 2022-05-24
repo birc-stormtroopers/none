@@ -3,127 +3,134 @@
 from __future__ import annotations
 
 from typing import (
-    TypeVar, Generic,
+    TypeVar,
     Callable as Fn,
     Optional as Opt,
 )
 
-from dataclasses import dataclass
 from functools import wraps
 import operator
 
 T = TypeVar('T')
 S = TypeVar('S')
+C = TypeVar('C')
 
+# Functions T -> S | Opt[S]
 Func = Fn[[T], Opt[S]]
 OptFunc = Fn[[Opt[T]], Opt[S]]
-Op = Fn[[T, T], Opt[T]]
-OptOp = Fn[[Opt[T], Opt[T]], Opt[T]]
+
+# Operators T + T -> S | Opt[S]
+# There are two kinds of these:
+# 1) binops like + where any None operand should result in None
+# 2) summaries like min(-,-) where if one operand is
+#    None we want the other operand (that might be None as well).
+Op = Fn[[T, T], Opt[S]]
+OptOp = Fn[[Opt[T], Opt[T]], Opt[S]]
 
 
-def bind_func(f: Func[T, S]) -> OptFunc[T, S]:
-    """Bind f in the monadic sense."""
+def lift_func(f: Func[T, S]) -> OptFunc[T, S]:
+    """Generalise function to deal with None."""
     @wraps(f)
     def w(x: Opt[T]) -> Opt[S]:
         return None if x is None else f(x)
     return w
 
 
-def bind_op(op: Op[T]) -> OptOp[T]:
-    """Bind an operator so it returns non-None values if possible."""
+def lift_op(op: Op[T, S]) -> OptOp[T, S]:
+    """Generalise operator to deal with None."""
+    @wraps(op)
+    def w(a: Opt[T], b: Opt[T]) -> Opt[S]:
+        return None if a is None or b is None else op(a, b)
+    return w
+
+
+def lift_summary(op: Op[T, T]) -> OptOp[T, T]:
+    """Generalise summeration to deal with None."""
     @wraps(op)
     def w(a: Opt[T], b: Opt[T]) -> Opt[T]:
-        if a is None:
-            return b
-        if b is None:
-            return a
-        return op(a, b)
+        return b if a is None else a if b is None else op(a, b)
     return w
 
 
-def yes(x: T) -> Maybe[T]:
-    """Make a maybe that contains a value."""
-    return Maybe(x)
+def unwrap(x: Opt[T]) -> T:
+    """Get the value for an optional or throw an exception."""
+    if x is None:
+        raise ValueError("Must not be None")
+    return x
+
+# Hack
 
 
-def no() -> Maybe[T]:
-    """Make a maybe that doesn't contain a value."""
-    return Maybe(None)
+def wrap_op(op: Op[T, S]) -> Fn[[C, tuple[Opt[T], Opt[T]]], Opt[S]]:
+    """Wrap an operator to something we can use as a method."""
+    w = lift_op(op)
+
+    @wraps(op)
+    def method(_self: C, ab: tuple[Opt[T], Opt[T]]) -> Opt[S]:
+        a, b = ab
+        return w(a, b)
+
+    return method
 
 
-def val(y: Maybe[T]) -> T:
-    """Get a value out of a maybe."""
-    if y.val is None:
-        raise TypeError("You cannot get the value of a None Maybe")
-    return y.val
+class M:
+    """Class entirely existing for operator overloading."""
 
+    def __or__(self, f: Func[T, S]) -> OptFunc[T, S]:
+        """Bind f in the monadic sense."""
+        return lift_func(f)
 
-def bind_cmp(m: Fn[[T, T], bool]) -> Fn[[Maybe[T], Maybe[T] | T], bool]:
-    """Return false if either argument is true, otherwise apply op."""
-    @wraps(m)
-    def w(self: Maybe[T], other: Maybe[T] | T) -> bool:
-        if self.val is None:
-            return False
-        if isinstance(other, Maybe):
-            if other.val is None:
-                return False
-            other = other.val
-        return m(self.val, other)
-    return w
+    def __matmul__(self, op: Op[T, S]) -> OptOp[T, S]:
+        """Bind op in the monadic sense."""
+        return lift_op(op)
 
+    def __floordiv__(self, op: Op[T, T]) -> OptOp[T, T]:
+        """Bind op in the monadic sense."""
+        return lift_summary(op)
 
-@dataclass
-class Maybe(Generic[T]):
-    """Maybe monad."""
-
-    val: Opt[T]
-
-    def __rshift__(self, f: Func[T, S]) -> Maybe[S]:
-        """Apply the monadic operator."""
-        return Maybe(bind_func(f)(self.val))
-
-    # Do this selectively, somehow...
-    __lt__ = bind_cmp(operator.lt)
-    __gt__ = bind_cmp(operator.gt)
+    __lt__ = wrap_op(operator.lt)
+    __gt__ = wrap_op(operator.gt)
     ...
 
 
-def maybe_func(f: Func[T, S]) -> Fn[[Maybe[T]], Maybe[S]]:
-    """Bind f in the monadic sense."""
-    @ wraps(f)
-    def w(x: Maybe[T]) -> Maybe[S]:
-        return x >> f
-    return w
+m = M()
 
 
-def maybe_op(op: Op[T]) -> Fn[[Maybe[T], Maybe[T]], Maybe[T]]:
-    """Bind an operator so it returns non-None values if possible."""
-    @ wraps(op)
-    def w(a: Maybe[T], b: Maybe[T]) -> Maybe[T]:
-        return Maybe(bind_op(op)(a.val, b.val))
-    return w
+def f(x: float) -> float:
+    """Test."""
+    return 2*x
+
+
+zz = (m | f)((m | f)(1))
+yy = (m | f)(15)
+
+mymin: Op[float, float] = min
+print('zz', zz, 'yy', yy, 'min', (m @ mymin)(zz, yy))
+print(m < (zz, yy))
+print(m < (zz, None))
+
 
 # Application... binary heap stuff...
 
 
-def maybe_get(x: list[T], i: int) -> Maybe[tuple[T, int]]:
+def maybe_get(x: list[T], i: int) -> Opt[tuple[T, int]]:
     """Get value at index i if possible."""
     try:
-        return Maybe((x[i], i))
+        return (x[i], i)
     except IndexError:
-        return Maybe(None)
+        return None
 
 
 def swap_min_child(x: list[T], p: int) -> None:
     """Swap node p with its smallest child."""
     left = maybe_get(x, 2*p + 1)
     right = maybe_get(x, 2*p + 2)
-    f: Op[tuple[T, int]] = min  # type checker is drunk
-    smallest = maybe_op(f)(left, right)
+    mi: Op[tuple[T, int], tuple[T, int]] = min
+    smallest = (m // mi)(left, right)
 
     me = maybe_get(x, p)
-    if smallest < me:
-        _, c = val(smallest)
+    if m < (smallest, me):
+        _, c = unwrap(smallest)
         print('swapping parent and child...', p, '<->', c)
 
 
@@ -132,39 +139,3 @@ swap_min_child(x, 0)
 swap_min_child(x, 1)
 swap_min_child(x, 2)
 swap_min_child(x, 3)
-
-
-# Hack
-class M:
-    """Class entirely existing for operator overloading."""
-
-    def __matmul__(self, f: Func[T, S]) -> Fn[[Maybe[T]], Maybe[S]]:
-        """Bind f in the monadic sense."""
-        return maybe_func(f)
-
-    def __add__(self, op: Op[T]) -> Fn[[Maybe[T], Maybe[T]], Maybe[T]]:
-        """Bind op in the monadic sense."""
-        return maybe_op(op)
-
-    # generic generate these
-    def __lt__(self, ab: tuple[Maybe[T], Maybe[S]]) -> bool:
-        """Test less than."""
-        a, b = ab
-        if a.val is None:
-            return False
-        if b.val is None:
-            return False
-        return a.val < b.val
-
-
-m = M()
-
-
-def f(x): return 2*x
-
-
-zz = (m @ f)((m @ f)(yes(1)))
-yy = (m @ f)(yes(15))
-print('zz', zz, 'yy', yy, 'min', (m+min)(zz, yy))
-print(m < (zz, yy))
-print(m < (zz, no()))
