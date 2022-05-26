@@ -13,119 +13,6 @@ from typing import (
 from functools import wraps
 from operator import lt
 
-T = TypeVar('T')
-S = TypeVar('S')
-C = TypeVar('C')
-
-
-# Functions T -> S | Opt[S]
-Func = Fn[[T], Opt[S]]
-OptFunc = Fn[[Opt[T]], Opt[S]]
-
-# Operators T + T -> S | Opt[S]
-Op = Fn[[T, T], Opt[S]]
-OptOp = Fn[[Opt[T], Opt[T]], Opt[S]]
-
-
-def lift_func(f: Func[T, S]) -> OptFunc[T, S]:
-    """
-    Generalise function to deal with None.
-
-    f'(x) = None if x is None.
-    f'(x) = f(x) otherwise.
-    """
-    @wraps(f)
-    def w(x: Opt[T]) -> Opt[S]:
-        return None if x is None else f(x)
-    return w
-
-
-def lift_op(op: Op[T, S]) -> OptOp[T, S]:
-    """
-    Generalise operator to deal with None.
-
-    op'(x,y) = None if either x or y are None.
-    op'(x,y) = op(x,y) otherwise.
-    """
-    @wraps(op)
-    def w(a: Opt[T], b: Opt[T]) -> Opt[S]:
-        return None if a is None or b is None else op(a, b)
-    return w
-
-
-def fold(op: Fn[[T, T], Opt[T]], *args: Opt[T]) -> Opt[T]:
-    """
-    Generalise a fold over the operator by tossing away None.
-
-    After we have removed all None we will return None if the
-    resulting list is empty, the singleton element if there is one,
-    and otherwise apply op to all the elements left to right.
-    If the op returns None at any point that is also the final
-    result.
-    """
-    args = tuple(a for a in args if a is not None)
-    if not args:
-        return None
-    assert args[0] is not None  # For the type checker
-    res: Opt[T] = args[0]
-    for a in args[1:]:
-        assert res is not None  # For the type checker
-        assert a is not None    # For the type checker
-        res = op(res, a)
-        if res is None:
-            return None
-    return res
-
-
-def unwrap(x: Opt[T]) -> T:
-    """Get the value for an optional or throw an exception."""
-    if x is None:
-        raise ValueError("Must not be None")
-    return x
-
-# Hack
-
-
-class M:
-    """Class entirely existing for operator overloading."""
-
-    def __or__(self, f: Func[T, S]) -> OptFunc[T, S]:
-        """
-        Lift the function f.
-
-        If f: T -> Opt[S] then (m|f): Opt[T] -> Opt[S]
-        by propagating None.
-        """
-        return lift_func(f)
-
-    def __truediv__(self, op: Op[T, S]) -> OptOp[T, S]:
-        """
-        Lift the operator op.
-
-        If op(T,T) -> Opt[S] then (m/op): (Opt[T],Opt[T]) -> Opt[S]
-        by propagating None.
-        """
-        return lift_op(op)
-
-    def fold(self, f: Op[T, T], *args: Opt[T]) -> Opt[T]:
-        """Fold f over args."""
-        return fold(f, *args)
-
-    def __matmul__(self, f: Op[T, T]) -> Fn[..., Opt[T]]:
-        """Operator for fold."""
-        @wraps(f)
-        def w(*args: Opt[T]) -> Opt[T]:
-            return fold(f, *args)
-        return w
-
-
-m = M()
-
-
-def f(x: float) -> float:
-    """Test."""
-    return 2*x
-
 
 class Ordered(Protocol):
     """Types that support < comparison."""
@@ -137,32 +24,140 @@ class Ordered(Protocol):
 
 Ord = TypeVar('Ord', bound=Ordered)
 
+T = TypeVar('T')
+S = TypeVar('S')
+R = TypeVar('R')
 
-def tmin(a: Ord, b: Ord) -> Ord:
+Fun = Fn[[T], Opt[R]]
+Fun2 = Fn[[T, S], Opt[R]]
+LiftFun = Fn[[Opt[T]], Opt[R]]
+LiftFun2 = Fn[[Opt[T], Opt[S]], Opt[R]]
+
+
+class IsNone(Exception):
+    """Exception when we see an unwanted None."""
+
+
+def unwrap(x: Opt[T]) -> T:
     """
-    Minimum of a and b.
+    Get the value for an optional or throw an exception.
 
-    Restore some type sanity to Python with this.
+    It functions both as the unwrap() method and the ? operator
+    in Rust, except that to use it as ? you need to wrap expressions
+    in a try...except block.
     """
-    return a if a < b else b
+    if x is None:
+        raise IsNone()
+    return x
 
 
-zz: Opt[float] = (m | f)((m | f)(1))
-yy: Opt[float] = (m | f)(None)
+def lift_func(f: Fun[T, R]) -> LiftFun[T, R]:
+    """
+    Generalise function to deal with None.
 
-print('xxx', zz, yy, (m/lt)(zz, yy), (m/lt)(yy, zz))
+    f'(x) = None if x is None.
+    f'(x) = f(x) otherwise.
+    """
+    @wraps(f)
+    def w(x: Opt[T]) -> Opt[R]:
+        return None if x is None else f(x)
+    return w
 
 
-print('zz', zz, 'yy', yy, 'min', fold(tmin, zz, yy))
-print('zz', zz, 'yy', yy, 'min', (m@tmin)(zz, yy))
-print((m/lt)(zz, yy))
-print((m/lt)(zz, None))
+def lift_op(op: Fun2[T, S, R]) -> LiftFun2[T, S, R]:
+    """
+    Generalise operator to deal with None.
+
+    op'(x,y) = None if either x or y are None.
+    op'(x,y) = op(x,y) otherwise.
+    """
+    @wraps(op)
+    def w(a: Opt[T], b: Opt[S]) -> Opt[R]:
+        return None if a is None or b is None else op(a, b)
+    return w
+
+
+def fold(op: Fun2[T, T, T], *args: Opt[T]) -> Opt[T]:
+    """
+    Generalise a fold over the operator by tossing away None.
+
+    After we have removed all None we will return None if the
+    resulting list is empty, the singleton element if there is one,
+    and otherwise apply op to all the elements left to right.
+    If the op returns None at any point that is also the final
+    result.
+    """
+    try:  # try-block because of unwrap()
+
+        non_none = tuple(a for a in args if a is not None)
+        if not non_none:
+            return None
+
+        res = non_none[0]
+        for a in non_none[1:]:
+            res = unwrap(op(res, a))
+        return res
+
+    except IsNone:
+        return None
+
+
+# Hack
+
+
+class LiftOpt:
+    """Class entirely existing for operator overloading."""
+
+    def __truediv__(self, f: Fun[T, S]) -> LiftFun[T, S]:
+        """
+        Lift the function f.
+
+        If f: T -> Opt[S] then (lift/f): Opt[T] -> Opt[S]
+        by propagating None.
+        """
+        return lift_func(f)
+
+    def __floordiv__(self, op: Fun2[T, S, R]) -> LiftFun2[T, S, R]:
+        """
+        Lift the operator op.
+
+        If op(T,S) -> Opt[R] then (lift//op): (Opt[T],Opt[S]) -> Opt[R]
+        by propagating None.
+        """
+        return lift_op(op)
+
+    def fold(self, f: Fun2[T, T, T], *args: Opt[T]) -> Opt[T]:
+        """Fold f over args."""
+        return fold(f, *args)
+
+
+lift = LiftOpt()
+
+
+def f(x: float) -> float:
+    """Test."""
+    return 2*x
+
+
+zz: Opt[float] = (lift/f)((lift/f)(1.2))
+yy: Opt[float] = (lift/f)(42)
+ww: Opt[float] = (lift/f)(None)
+
+print('xxx', zz, yy,
+      (lift//lt)(zz, yy), (lift//lt)(yy, zz),
+      (lift//lt)(yy, ww))
+
+foo = fold(min, zz, yy)
+bar = lift.fold(min, zz, ww)
+print('zz', zz, 'yy', yy, 'min', foo, bar)
+print((lift//lt)(zz, yy))
+print((lift//lt)(zz, None))
 
 
 # Application... binary heap stuff...
 
 
-def maybe_get(x: list[T], i: int) -> Opt[tuple[T, int]]:
+def get(x: list[T], i: int) -> Opt[tuple[T, int]]:
     """Get value at index i if possible."""
     try:
         return (x[i], i)
@@ -172,14 +167,9 @@ def maybe_get(x: list[T], i: int) -> Opt[tuple[T, int]]:
 
 def swap_min_child(x: list[Ord], p: int) -> None:
     """Swap node p with its smallest child."""
-    left = maybe_get(x, 2*p + 1)
-    right = maybe_get(x, 2*p + 2)
-    smallest: Opt[tuple[Ord, int]] = (m@tmin)(left, right)
-    print('smallest', smallest)
-
-    me = maybe_get(x, p)
-    if (m/lt)(smallest, me):
-        _, c = unwrap(smallest)
+    child = lift.fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    if (lift//lt)(child, get(x, p)):
+        _, c = unwrap(child)  # If child < parent it can't be None
         print('swapping parent and child...', p, '<->', c)
 
 
@@ -188,3 +178,21 @@ swap_min_child(x, 0)
 swap_min_child(x, 1)
 swap_min_child(x, 2)
 swap_min_child(x, 3)
+
+
+def swap_min_child_2(x: list[Ord], p: int) -> None:
+    """Swap node p with its smallest child."""
+    child = lift.fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    try:
+        v, c = unwrap(child)
+        if v < x[p]:
+            print('swapping parent and child...', p, '<->', c)
+
+    except IsNone:
+        pass
+
+
+swap_min_child_2(x, 0)
+swap_min_child_2(x, 1)
+swap_min_child_2(x, 2)
+swap_min_child_2(x, 3)
