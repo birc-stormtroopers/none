@@ -7,7 +7,8 @@ from typing import (
     Protocol,
     Callable as Fn,
     Optional as Opt,
-    Any
+    Any,
+    overload
 )
 
 from functools import wraps
@@ -28,11 +29,6 @@ T = TypeVar('T')
 S = TypeVar('S')
 R = TypeVar('R')
 
-Fun = Fn[[T], Opt[R]]
-Fun2 = Fn[[T, S], Opt[R]]
-LiftFun = Fn[[Opt[T]], Opt[R]]
-LiftFun2 = Fn[[Opt[T], Opt[S]], Opt[R]]
-
 
 class IsNone(Exception):
     """Exception when we see an unwanted None."""
@@ -51,33 +47,29 @@ def unwrap(x: Opt[T]) -> T:
     return x
 
 
-def lift_func(f: Fun[T, R]) -> LiftFun[T, R]:
-    """
-    Generalise function to deal with None.
+@overload
+def lift(f: Fn[[T], Opt[R]]) -> Fn[[Opt[T]], Opt[R]]:
+    """Lift function f."""
+    ...
 
-    f'(x) = None if x is None.
-    f'(x) = f(x) otherwise.
-    """
+
+@overload
+def lift(f: Fn[[T, S], Opt[R]]) -> Fn[[Opt[T], Opt[S]], Opt[R]]:
+    """Lift function f."""
+    ...
+
+
+def lift(f: Fn[..., Opt[R]]) -> Fn[..., Opt[R]]:
+    """Lift a generic function."""
     @wraps(f)
-    def w(x: Opt[T]) -> Opt[R]:
-        return None if x is None else f(x)
+    def w(*args: Any, **kwargs: Any) -> Opt[R]:
+        if None in args or None in kwargs.values():
+            return None
+        return f(*args, **kwargs)
     return w
 
 
-def lift_op(op: Fun2[T, S, R]) -> LiftFun2[T, S, R]:
-    """
-    Generalise operator to deal with None.
-
-    op'(x,y) = None if either x or y are None.
-    op'(x,y) = op(x,y) otherwise.
-    """
-    @wraps(op)
-    def w(a: Opt[T], b: Opt[S]) -> Opt[R]:
-        return None if a is None or b is None else op(a, b)
-    return w
-
-
-def fold(op: Fun2[T, T, T], *args: Opt[T]) -> Opt[T]:
+def fold(op: Fn[[T, T], Opt[T]], *args: Opt[T]) -> Opt[T]:
     """
     Generalise a fold over the operator by tossing away None.
 
@@ -102,36 +94,8 @@ def fold(op: Fun2[T, T, T], *args: Opt[T]) -> Opt[T]:
         return None
 
 
-# Hack
-
-
-class LiftOpt:
-    """Class entirely existing for operator overloading."""
-
-    def __truediv__(self, f: Fun[T, S]) -> LiftFun[T, S]:
-        """
-        Lift the function f.
-
-        If f: T -> Opt[S] then (lift/f): Opt[T] -> Opt[S]
-        by propagating None.
-        """
-        return lift_func(f)
-
-    def __floordiv__(self, op: Fun2[T, S, R]) -> LiftFun2[T, S, R]:
-        """
-        Lift the operator op.
-
-        If op(T,S) -> Opt[R] then (lift//op): (Opt[T],Opt[S]) -> Opt[R]
-        by propagating None.
-        """
-        return lift_op(op)
-
-    def fold(self, f: Fun2[T, T, T], *args: Opt[T]) -> Opt[T]:
-        """Fold f over args."""
-        return fold(f, *args)
-
-
-lift = LiftOpt()
+# notation hack
+ƛ = lift
 
 
 def f(x: float) -> float:
@@ -139,19 +103,18 @@ def f(x: float) -> float:
     return 2*x
 
 
-zz: Opt[float] = (lift/f)((lift/f)(1.2))
-yy: Opt[float] = (lift/f)(42)
-ww: Opt[float] = (lift/f)(None)
+zz: Opt[float] = ƛ(f)(ƛ(f)(1.2))
+yy: Opt[float] = ƛ(f)(42)
+ww: Opt[float] = ƛ(f)(None)
 
 print('xxx', zz, yy,
-      (lift//lt)(zz, yy), (lift//lt)(yy, zz),
-      (lift//lt)(yy, ww))
+      ƛ(lt)(zz, yy), ƛ(lt)(yy, zz),
+      ƛ(lt)(yy, ww))
 
 foo = fold(min, zz, yy)
-bar = lift.fold(min, zz, ww)
-print('zz', zz, 'yy', yy, 'min', foo, bar)
-print((lift//lt)(zz, yy))
-print((lift//lt)(zz, None))
+print('zz', zz, 'yy', yy, 'min', foo)
+print(ƛ(lt)(zz, yy))
+print(ƛ(lt)(zz, None))
 
 
 # Application... binary heap stuff...
@@ -167,8 +130,8 @@ def get(x: list[T], i: int) -> Opt[tuple[T, int]]:
 
 def swap_min_child(x: list[Ord], p: int) -> None:
     """Swap node p with its smallest child."""
-    child = lift.fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
-    if (lift//lt)(child, get(x, p)):
+    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    if ƛ(lt)(child, get(x, p)):
         _, c = unwrap(child)  # If child < parent it can't be None
         print('swapping parent and child...', p, '<->', c)
 
@@ -182,7 +145,7 @@ swap_min_child(x, 3)
 
 def swap_min_child_2(x: list[Ord], p: int) -> None:
     """Swap node p with its smallest child."""
-    child = lift.fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
     try:
         v, c = unwrap(child)
         if v < x[p]:
