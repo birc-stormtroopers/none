@@ -61,7 +61,7 @@ from inspect import (
 )
 import operator
 from typing import (
-    TypeVar,
+    TypeVar, ParamSpec,
     Generic, Protocol,
     Callable as Fn,
     Any,
@@ -73,6 +73,8 @@ from functools import wraps
 T = TypeVar('T')
 S = TypeVar('S')
 R = TypeVar('R')
+
+P = ParamSpec('P')
 
 # Handling operator protocols
 
@@ -103,6 +105,14 @@ class IsNothing(Exception):
     """Exception raised if we try to get the value of Nothing."""
 
 
+def _lift_ret(f: Fn[P, R]) -> Fn[P, Maybe[R]]:
+    """Lift f to return a Maybe."""
+    @wraps(f)
+    def w(*args: P.args, **kwargs: P.kwargs) -> Maybe[R]:
+        return Some(f(*args, **kwargs))
+    return w
+
+
 def _lift(f: Fn[..., R]) -> Fn[..., Maybe[R]]:
     """Lift f to work on Maybe."""
     @wraps(f)
@@ -130,8 +140,17 @@ class Maybe(Generic[T]):
     # isn't checked against what ops T has. The latter is
     # hard to do when Maybe is dynamic and the type checking
     # is static...
-    __lt__ = _lift(operator.lt)
-    __add__ = _lift(operator.lt)
+    _lt = _lift(operator.lt)
+
+    def __lt__(self: Maybe[Ord], other: Maybe[T]) -> Maybe[R]:
+        """Compare with other."""
+        return self._lt(other)
+
+    _add = _lift(operator.add)
+
+    def __add__(self: Maybe[Arith], other: Maybe[T]) -> Maybe[R]:
+        """Add self with other."""
+        return self._add(other)
 
 
 class Some(Maybe[T]):
@@ -201,13 +220,25 @@ print(z)
 z = y >> (lambda a: Some(2*a)) >> (lambda a: Some(-a))
 print(z)
 
+
+# Try with lifting a function
+def mult13(x: int) -> int:
+    """Test function for lifting."""
+    return 13 * x
+
+
+ƛ = _lift_ret
+z = x >> ƛ(mult13)
+print(z)
+z = y >> ƛ(mult13)
+print(z)
+
 # Operators require currying
 z = x >> (lambda a: y >> (lambda b: Some(a+b)))
 print(z)
 
 z = x >> (lambda a: x >> (lambda b: Some(a+b)))
 print(z)
-
 
 # Operator overloading
 print('sig lt', signature(Maybe.__lt__))
@@ -219,3 +250,13 @@ print('add', x + y)
 print('lt', x < y)
 print('lt', z < x)
 print('lt', x < Some(12))
+
+
+class Foo:
+    """Just a type without < or +."""
+
+
+# Fails. Should also be a type error since Maybe is a type and you cannot
+# compare or add those.
+print('add', Some(Foo()) < Some(Foo()))
+print('add', Some(Foo()) + Some(Foo()))
