@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import (
     TypeVar,
-    Protocol,
     Callable as Fn,
     Optional as Opt,
+    Protocol,
     Any,
     overload
 )
@@ -25,16 +25,18 @@ class Ordered(Protocol):
 
 Ord = TypeVar('Ord', bound=Ordered)
 
-T = TypeVar('T')
-S = TypeVar('S')
-R = TypeVar('R')
+_T1 = TypeVar('_T1')
+_T2 = TypeVar('_T2')
+_T3 = TypeVar('_T3')
+_T4 = TypeVar('_T4')
+_R = TypeVar('_R')
 
 
 class IsNone(Exception):
     """Exception when we see an unwanted None."""
 
 
-def unwrap(x: Opt[T]) -> T:
+def unwrap(x: Opt[_T1]) -> _T1:
     """
     Get the value for an optional or throw an exception.
 
@@ -48,28 +50,42 @@ def unwrap(x: Opt[T]) -> T:
 
 
 @overload
-def lift(f: Fn[[T], Opt[R]]) -> Fn[[Opt[T]], Opt[R]]:
+def lift(f: Fn[[_T1], Opt[_R]]) -> Fn[[Opt[_T1]], Opt[_R]]:
     """Lift function f."""
     ...
 
 
 @overload
-def lift(f: Fn[[T, S], Opt[R]]) -> Fn[[Opt[T], Opt[S]], Opt[R]]:
+def lift(f: Fn[[_T1, _T2], Opt[_R]]) -> Fn[[Opt[_T1], Opt[_T2]], Opt[_R]]:
     """Lift function f."""
     ...
 
 
-def lift(f: Fn[..., Opt[R]]) -> Fn[..., Opt[R]]:
+@overload
+def lift(f: Fn[[_T1, _T2, _T3], Opt[_R]]) \
+        -> Fn[[Opt[_T1], Opt[_T2], Opt[_T3]], Opt[_R]]:
+    """Lift function f."""
+    ...
+
+
+@overload
+def lift(f: Fn[[_T1, _T2, _T3, _T4], Opt[_R]]) \
+        -> Fn[[Opt[_T1], Opt[_T2], Opt[_T3], Opt[_T4]], Opt[_R]]:
+    """Lift function f."""
+    ...
+
+
+def lift(f: Fn[..., Opt[_R]]) -> Fn[..., Opt[_R]]:
     """Lift a generic function."""
     @wraps(f)
-    def w(*args: Any, **kwargs: Any) -> Opt[R]:
+    def w(*args: Any, **kwargs: Any) -> Opt[_R]:
         if None in args or None in kwargs.values():
             return None
         return f(*args, **kwargs)
     return w
 
 
-def fold(op: Fn[[T, T], Opt[T]], *args: Opt[T]) -> Opt[T]:
+def fold(op: Fn[[_T1, _T1], Opt[_T1]], *args: Opt[_T1]) -> Opt[_T1]:
     """
     Generalise a fold over the operator by tossing away None.
 
@@ -120,7 +136,7 @@ print(ƛ(lt)(zz, None))
 # Application... binary heap stuff...
 
 
-def get(x: list[T], i: int) -> Opt[tuple[T, int]]:
+def get(x: list[_T1], i: int) -> Opt[tuple[_T1, int]]:
     """Get value at index i if possible."""
     try:
         return (x[i], i)
