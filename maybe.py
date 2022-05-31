@@ -65,7 +65,6 @@ from typing import (
     Generic, Protocol,
     Callable as Fn,
     Any,
-    runtime_checkable
 )
 from functools import wraps
 
@@ -79,20 +78,18 @@ P = ParamSpec('P')
 # Handling operator protocols
 
 
-@runtime_checkable
 class Ordered(Protocol):
     """Types that support < comparison."""
 
-    def __lt__(self: Ord, other: Any) -> bool:
+    def __lt__(self: Ord, other: Ord) -> bool:
         """Determine if self is < other."""
         ...
 
 
-@runtime_checkable
 class Arithmetic(Protocol):
     """Types that support < comparison."""
 
-    def __add__(self: Arith, other: Any) -> Arith:
+    def __add__(self: Arith, other: Any) -> Any:
         """Add self and other."""
         ...
 
@@ -101,13 +98,77 @@ Ord = TypeVar('Ord', bound=Ordered)
 Arith = TypeVar('Arith', bound=Arithmetic)
 
 
+def f(x: Ord) -> None:
+    """Do nothing."""
+    print('nothing done,', x)
+
+
+class Bar:
+    """Nothing to see here."""
+
+
+f(1)
+f("foo")
+# f(lambda x: x) # type error, ok
+# f(Bar)         # type error, ok
+# f(Bar())       # type error, ok
+
+X = TypeVar('X', int, float, str)
+
+
+class Wrap(Generic[T]):
+    """Wrap a value of type T."""
+
+    val: T
+
+    def __init__(self, val: T) -> None:
+        """Wrap a value."""
+        self.val = val
+
+    def __lt__(self: Wrap[X], other: Wrap[X]) -> bool:
+        """Compare wrapped."""
+        return self.val < other.val
+
+    def f(self: Wrap[T], _x: Wrap[Ord]) -> None:
+        """Test."""
+        return
+
+    def g(self: Wrap[Ord], _x: Wrap[S]) -> None:
+        """Test."""
+        return
+
+
+# these should be okay since _x is Wrap[int] so Wrap[Ord]
+Wrap(1).f(Wrap(1))    # Ok
+Wrap(Bar).f(Wrap(1))  # Ok
+
+# these should not be okay since _x is Wrap[Bar]
+Wrap(1).f(Wrap(Bar))      # Error -- which we want
+Wrap("foo").f(Wrap(Bar))  # Error -- which we want
+
+# These should be okay since self is Wrap[int]
+Wrap(1).g(Wrap(1))    # Ok
+Wrap(1).g(Wrap(Bar))  # Ok, _x is Wrap[S] but that's fine
+
+# These should not okay since self is Wrap[Bar] which isn't Wrap[Ord]
+Wrap(Bar).g(Wrap(1))    # Ok, but *shouldn't be*
+Wrap(Bar).g(Wrap(Bar))  # Ok, but *shouldn't be*
+
+
+print(Wrap(1) < Wrap(2))                      # type error
+print(Wrap("foo") < Wrap("bar"))              # type error
+print(Wrap(lambda x: x) < Wrap(lambda x: x))  # type error
+print(Wrap(Bar) < Wrap(Bar))                  # type error
+print(Wrap(Bar()) < Wrap(Bar()))              # type error
+
+
 class IsNothing(Exception):
     """Exception raised if we try to get the value of Nothing."""
 
 
 def _lift_ret(f: Fn[P, R]) -> Fn[P, Maybe[R]]:
     """Lift f to return a Maybe."""
-    @wraps(f)
+    @ wraps(f)
     def w(*args: P.args, **kwargs: P.kwargs) -> Maybe[R]:
         return Some(f(*args, **kwargs))
     return w
@@ -115,7 +176,7 @@ def _lift_ret(f: Fn[P, R]) -> Fn[P, Maybe[R]]:
 
 def _lift(f: Fn[..., R]) -> Fn[..., Maybe[R]]:
     """Lift f to work on Maybe."""
-    @wraps(f)
+    @ wraps(f)
     def w(*args: Maybe[Any]) -> Maybe[R]:
         try:
             return Some(f(*(a.unwrap() for a in args)))
@@ -135,14 +196,14 @@ class Maybe(Generic[T]):
         """Return the wrapped value or raise an exception."""
         ...
 
-    # FIXME: The type checking isn't working properly here...
-    # The type of the operators isn't right, and the lifted op
-    # isn't checked against what ops T has. The latter is
-    # hard to do when Maybe is dynamic and the type checking
-    # is static...
+    # FIXME: There is a bug in mypy https://github.com/python/mypy/issues/11167
+    # that prevents the propert type checking of wrapped types, so I cannot
+    # ensure that an operator is only valid if the underlying type supports it.
+    # The second I add an operator to this class, mypy thinks that all wrapped
+    # types support it. Stupid mypy!
     _lt = _lift(operator.lt)
 
-    def __lt__(self: Maybe[Ord], other: Maybe[T]) -> Maybe[R]:
+    def __lt__(self: Maybe[Ord], other: Maybe[Ord]) -> Maybe[bool]:
         """Compare with other."""
         return self._lt(other)
 
@@ -250,13 +311,3 @@ print('add', x + y)
 print('lt', x < y)
 print('lt', z < x)
 print('lt', x < Some(12))
-
-
-class Foo:
-    """Just a type without < or +."""
-
-
-# Fails. Should also be a type error since Maybe is a type and you cannot
-# compare or add those.
-print('add', Some(Foo()) < Some(Foo()))
-print('add', Some(Foo()) + Some(Foo()))
