@@ -6,7 +6,7 @@ from typing import (
     TypeVar,
     Callable as Fn,
     Optional as Opt,
-    Protocol,
+    Generic, Protocol,
     Any,
     overload
 )
@@ -25,52 +25,38 @@ class Ordered(Protocol):
 
 Ord = TypeVar('Ord', bound=Ordered)
 
-_T1 = TypeVar('_T1')
-_T2 = TypeVar('_T2')
-_T3 = TypeVar('_T3')
-_T4 = TypeVar('_T4')
+_T = TypeVar('_T')
+_S = TypeVar('_S')
 _R = TypeVar('_R')
 
-
-class IsNone(Exception):
-    """Exception when we see an unwanted None."""
-
-
-def unwrap(x: Opt[_T1]) -> _T1:
-    """
-    Get the value for an optional or throw an exception.
-
-    It functions both as the unwrap() method and the ? operator
-    in Rust, except that to use it as ? you need to wrap expressions
-    in a try...except block.
-    """
-    if x is None:
-        raise IsNone()
-    return x
+_1 = TypeVar('_1')
+_2 = TypeVar('_2')
+_3 = TypeVar('_3')
+_4 = TypeVar('_4')
 
 
 @overload
-def lift(f: Fn[[_T1], Opt[_R]]) -> Fn[[Opt[_T1]], Opt[_R]]:
+def lift(f: Fn[[_1], Opt[_R]]) -> Fn[[Opt[_1]], Opt[_R]]:
     """Lift function f."""
     ...
 
 
 @overload
-def lift(f: Fn[[_T1, _T2], Opt[_R]]) -> Fn[[Opt[_T1], Opt[_T2]], Opt[_R]]:
+def lift(f: Fn[[_1, _2], Opt[_R]]) -> Fn[[Opt[_1], Opt[_2]], Opt[_R]]:
     """Lift function f."""
     ...
 
 
 @overload
-def lift(f: Fn[[_T1, _T2, _T3], Opt[_R]]) \
-        -> Fn[[Opt[_T1], Opt[_T2], Opt[_T3]], Opt[_R]]:
+def lift(f: Fn[[_1, _2, _3], Opt[_R]]) \
+        -> Fn[[Opt[_1], Opt[_2], Opt[_3]], Opt[_R]]:
     """Lift function f."""
     ...
 
 
 @overload
-def lift(f: Fn[[_T1, _T2, _T3, _T4], Opt[_R]]) \
-        -> Fn[[Opt[_T1], Opt[_T2], Opt[_T3], Opt[_T4]], Opt[_R]]:
+def lift(f: Fn[[_1, _2, _3, _4], Opt[_R]]) \
+        -> Fn[[Opt[_1], Opt[_2], Opt[_3], Opt[_4]], Opt[_R]]:
     """Lift function f."""
     ...
 
@@ -85,7 +71,46 @@ def lift(f: Fn[..., Opt[_R]]) -> Fn[..., Opt[_R]]:
     return w
 
 
-def fold(op: Fn[[_T1, _T1], Opt[_T1]], *args: Opt[_T1]) -> Opt[_T1]:
+def lift_select(f: Fn[[_T], _R], g: Fn[[_S], _R], h: Fn[[_T, _S], _R]
+                ) -> Fn[[Opt[_T], Opt[_S]], Opt[_R]]:
+    """Lift a function so it applies f, g, or h depending on None args."""
+    @wraps(h)
+    def w(x: Opt[_T], y: Opt[_S]) -> Opt[_R]:
+        match x, y:
+            case None, None:
+                return None
+            case x, None:
+                assert x is not None, "Stupid type checker"
+                return f(x)
+            case None, y:
+                assert y is not None, "Stupid type checker"
+                return g(y)
+            case x, y:
+                assert x is not None and y is not None, "Stupid type checker"
+                return h(x, y)
+        return None  # Stupid type checker
+    return w
+
+
+class IsNone(Exception):
+    """Exception when we see an unwanted None."""
+
+
+def unwrap(x: Opt[_T]) -> _T:
+    """
+    Get the value for an optional or throw an exception.
+
+    It functions both as the unwrap() method and the ? operator
+    in Rust, except that to use it as ? you need to wrap expressions
+    in a try...except block at some call level (and the type
+    checker cannot check if you really do this).
+    """
+    if x is None:
+        raise IsNone()
+    return x
+
+
+def fold(op: Fn[[_T, _T], Opt[_T]], *args: Opt[_T]) -> Opt[_T]:
     """
     Generalise a fold over the operator by tossing away None.
 
@@ -136,7 +161,7 @@ print(ƛ(lt)(zz, None))
 # Application... binary heap stuff...
 
 
-def get(x: list[_T1], i: int) -> Opt[tuple[_T1, int]]:
+def get(x: list[_T], i: int) -> Opt[tuple[_T, int]]:
     """Get value at index i if possible."""
     try:
         return (x[i], i)
