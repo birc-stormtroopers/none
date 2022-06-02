@@ -6,13 +6,21 @@ from typing import (
     TypeVar,
     Callable as Fn,
     Optional as Opt,
-    Generic, Protocol,
+    Protocol,
     Any,
     overload
 )
 
 from functools import wraps
 from operator import lt
+
+_T = TypeVar('_T')
+_R = TypeVar('_R')
+
+_1 = TypeVar('_1')
+_2 = TypeVar('_2')
+_3 = TypeVar('_3')
+_4 = TypeVar('_4')
 
 
 class Ordered(Protocol):
@@ -24,15 +32,6 @@ class Ordered(Protocol):
 
 
 Ord = TypeVar('Ord', bound=Ordered)
-
-_T = TypeVar('_T')
-_S = TypeVar('_S')
-_R = TypeVar('_R')
-
-_1 = TypeVar('_1')
-_2 = TypeVar('_2')
-_3 = TypeVar('_3')
-_4 = TypeVar('_4')
 
 
 @overload
@@ -68,27 +67,6 @@ def lift(f: Fn[..., Opt[_R]]) -> Fn[..., Opt[_R]]:
         if None in args or None in kwargs.values():
             return None
         return f(*args, **kwargs)
-    return w
-
-
-def lift_select(f: Fn[[_T], _R], g: Fn[[_S], _R], h: Fn[[_T, _S], _R]
-                ) -> Fn[[Opt[_T], Opt[_S]], Opt[_R]]:
-    """Lift a function so it applies f, g, or h depending on None args."""
-    @wraps(h)
-    def w(x: Opt[_T], y: Opt[_S]) -> Opt[_R]:
-        match x, y:
-            case None, None:
-                return None
-            case x, None:
-                assert x is not None, "Stupid type checker"
-                return f(x)
-            case None, y:
-                assert y is not None, "Stupid type checker"
-                return g(y)
-            case x, y:
-                assert x is not None and y is not None, "Stupid type checker"
-                return h(x, y)
-        return None  # Stupid type checker
     return w
 
 
@@ -135,27 +113,24 @@ def fold(op: Fn[[_T, _T], Opt[_T]], *args: Opt[_T]) -> Opt[_T]:
         return None
 
 
-# notation hack
-ƛ = lift
-
-
 def f(x: float) -> float:
     """Test."""
     return 2*x
 
 
-zz: Opt[float] = ƛ(f)(ƛ(f)(1.2))
-yy: Opt[float] = ƛ(f)(42)
-ww: Opt[float] = ƛ(f)(None)
+zz: Opt[float] = lift(f)(lift(f)(1.2))
+yy: Opt[float] = lift(f)(42)
+ww: Opt[float] = lift(f)(None)
 
 print('xxx', zz, yy,
-      ƛ(lt)(zz, yy), ƛ(lt)(yy, zz),
-      ƛ(lt)(yy, ww))
+      lift(lt)(zz, yy),
+      lift(lt)(yy, zz),
+      lift(lt)(yy, ww))
 
 foo = fold(min, zz, yy)
 print('zz', zz, 'yy', yy, 'min', foo)
-print(ƛ(lt)(zz, yy))
-print(ƛ(lt)(zz, None))
+print(lift(lt)(zz, yy))
+print(lift(lt)(zz, None))
 
 
 # Application... binary heap stuff...
@@ -172,7 +147,7 @@ def get(x: list[_T], i: int) -> Opt[tuple[_T, int]]:
 def swap_min_child(x: list[Ord], p: int) -> None:
     """Swap node p with its smallest child."""
     child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
-    if ƛ(lt)(child, get(x, p)):
+    if lift(lt)(child, get(x, p)):
         _, c = unwrap(child)  # If child < parent it can't be None
         print('swapping parent and child...', p, '<->', c)
 
