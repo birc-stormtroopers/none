@@ -124,6 +124,8 @@ def f(x: int, y: int) -> int:
 f(None, 12) # fine, wrapped f deals with None
 ```
 
+But see below for issues if `f` is a generic function.
+
 This trick is, of course, more general than dealing with `None`. You can lift to other types as well if you need to, but that will have to be a topic for another day.
 
 Just by lifting you can implement many algorithms that handles all common cases that do not involve `None` and let the lifting deal with special cases for you. At some point you need to get the result of the computation, of course, and there you need to know if you got `None` or not, but until then, you might not have to worry about it at all.
@@ -157,5 +159,97 @@ apply(12, f)      # An Opt[int] because x is int
 apply("foo", f)   # An Opt[str] because x is str
 ```
 
-I have tried all kinds of trickery to implement generic lifting, but to no avail. I don't think it is currently possible.
+I have tried all kinds of trickery to implement generic lifting, but to no avail. I don't think it is currently possible. You just have to defer lifting until types are known.
+
+Anyway, moving on...
+
+If we have lifted functions, we can write functions that do not have to deal with `None` and automatically handle when we get a `None` anyway. (This is also a technique that works for more general error handling, but no need to go into that here).
+
+There are some drawbacks, though. This lifting stuff only works if you lift every function that needs to deal with a `None`, and notation wise, that might be cumbersome. Some languages do everything with functions, and you won't notice it there, but with something like Python you quickly get something that looks very odd.
+
+Consider computing the roots of a quadratic equation, $ax^2 + bx + c = 0$. The two real solutions, if they exist, are 
+
+$$ x = {-b \pm \sqrt{b^2-4ac} \over 2a} $$
+
+but you can get into trouble two places here. If $(b^2-4ac) < 0$ you can't take the square root (at least not in the reals) and if $a=0$ you can't divide by $2a$. Those are failure points and we can translate them into `None`, so it looks like something our new lifting magic can deal with. It can, but as I warned you, it might look a bit odd.
+
+The problem is that the errors appear in the middle of the expression and we need to propagate them out from there, but our `lift` magic can only handle changing function parameters, so we need to move the expressions there. One way is straightforward: make `sqrt()` return a `None` rather than cast an exception
+
+```python
+def catch_to_none(f: Fn[_P, _R]) -> Fn[_P, Opt[_R]]:
+    """Wrap a function so it returns None instead of an exception."""
+    @wraps(f)
+    def w(*args: _P.args, **kwargs: _P.kwargs) -> Opt[_R]:
+        try:
+            return f(*args, **kwargs)
+        except Exception:
+            return None
+    return w
+
+@catch_to_none  # math.sqrt() might throw ValueError
+def sqrt(x: float) -> float:
+    """Return sqrt of x or None if not defined."""
+    return math.sqrt(x)
+```
+
+then compute the square root first, put it into a function that handles if the result was `None`, and make sure that function translates a division by zero into `None`:
+
+```python
+def roots(a: float, b: float, c: float) -> Opt[tuple[float, float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    @catch_to_none  # We could divide by zero
+    @lift           # sq could be None
+    def _roots(sq: float) -> tuple[float, float]:
+        return (-b - sq) / (2*a), (-b + sq) / (2*a)
+
+    return _roots(sqrt(b**2 - 4*a*c))
+```
+
+Here, the lifting didn't do much for us. We could just have caught the exception in the first place...
+
+```python
+@catch_to_none
+def roots(a: float, b: float, c: float) -> tuple[float, float]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    sq = math.sqrt(b**2 - 4*a*c)
+    return (-b - sq) / (2*a), (-b + sq) / (2*a)
+```
+
+This is partly because we are in a situation where we get exceptions if something goes wrong, and partly because we always want exceptions to become `None`, so it is a little misleading, but does tell us that lifting might not be the thing for us here.
+
+If you want a proper lifting solution, you need all the expressions to handle `None`, so we don't handle errors through exceptions, but that means that we have to lift all the operators.
+
+```python
+@lift
+def neg(x: float) -> float:
+    """Return -x."""
+    # can't use operator.neg bcs type binding
+    return x
+
+
+sub = lift(operator.sub)
+add = lift(operator.add)
+mul = lift(operator.mul)
+
+
+@lift
+def div(a: float, b: float) -> Opt[float]:
+    """Return a/b or None if b is zero."""
+    return None if b == 0 else a / b
+
+
+@catch_to_none  # math.sqrt() might throw ValueError
+def sqrt(x: float) -> float:
+    """Return sqrt of x or None if not defined."""
+    return math.sqrt(x)
+
+
+def roots(a: float, b: float, c: float) -> tuple[Opt[float], Opt[float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    sq = sqrt(b**2 - 4*a*c) # didn't bother with lifted functions in arg here
+    return div(sub(neg(b), sq), mul(2, a)), div(add(neg(b), sq), mul(2, a))
+```
+
+Some languages already use functions for operators, and then it wouldn't look at odd, but it does here. We can lift operators, though, but only through methods, and we will look at a solution that enables that in the next section.
+
 

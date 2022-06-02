@@ -1,12 +1,14 @@
 """Maybe monad."""
 
 from __future__ import annotations
+from protocols import (
+    Ord
+)
 
 from typing import (
     TypeVar,
     Callable as Fn,
     Optional as Opt,
-    Protocol,
     Any,
     overload
 )
@@ -21,17 +23,6 @@ _1 = TypeVar('_1')
 _2 = TypeVar('_2')
 _3 = TypeVar('_3')
 _4 = TypeVar('_4')
-
-
-class Ordered(Protocol):
-    """Types that support < comparison."""
-
-    def __lt__(self: Ord, other: Any) -> bool:
-        """Determine if self is < other."""
-        ...
-
-
-Ord = TypeVar('Ord', bound=Ordered)
 
 
 @overload
@@ -113,26 +104,6 @@ def fold(op: Fn[[_T, _T], Opt[_T]], *args: Opt[_T]) -> Opt[_T]:
         return None
 
 
-def f(x: float) -> float:
-    """Test."""
-    return 2*x
-
-
-zz: Opt[float] = lift(f)(lift(f)(1.2))
-yy: Opt[float] = lift(f)(42)
-ww: Opt[float] = lift(f)(None)
-
-print('xxx', zz, yy,
-      lift(lt)(zz, yy),
-      lift(lt)(yy, zz),
-      lift(lt)(yy, ww))
-
-foo = fold(min, zz, yy)
-print('zz', zz, 'yy', yy, 'min', foo)
-print(lift(lt)(zz, yy))
-print(lift(lt)(zz, None))
-
-
 # Application... binary heap stuff...
 
 
@@ -159,19 +130,19 @@ swap_min_child(x, 2)
 swap_min_child(x, 3)
 
 
-def swap_min_child_2(x: list[Ord], p: int) -> None:
-    """Swap node p with its smallest child."""
-    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
-    try:
-        v, c = unwrap(child)
-        if v < x[p]:
-            print('swapping parent and child...', p, '<->', c)
+# def swap_min_child_2(x: list[Ord], p: int) -> None:
+#     """Swap node p with its smallest child."""
+#     child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+#     try:
+#         v, c = unwrap(child)
+#         if v < x[p]:
+#             print('swapping parent and child...', p, '<->', c)
 
-    except IsNone:
-        pass
+#     except IsNone:
+#         pass
 
 
-swap_min_child_2(x, 0)
-swap_min_child_2(x, 1)
-swap_min_child_2(x, 2)
-swap_min_child_2(x, 3)
+# swap_min_child_2(x, 0)
+# swap_min_child_2(x, 1)
+# swap_min_child_2(x, 2)
+# swap_min_child_2(x, 3)

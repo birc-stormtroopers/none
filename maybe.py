@@ -62,41 +62,18 @@ from inspect import (
 import operator
 from typing import (
     TypeVar, ParamSpec,
-    Generic, Protocol,
+    Generic,
     Callable as Fn,
     Any,
 )
+from protocols import (
+    Ord, Arith
+)
 from functools import wraps
 
-
-_1 = TypeVar('_1')
-_2 = TypeVar('_2')
-_3 = TypeVar('_3')
+_T = TypeVar('_T')
 _R = TypeVar('_R')
-
 _P = ParamSpec('_P')
-
-# Handling operator protocols
-
-
-class Ordered(Protocol):
-    """Types that support < comparison."""
-
-    def __lt__(self: Ord, other: Ord) -> bool:
-        """Determine if self is < other."""
-        ...
-
-
-class Arithmetic(Protocol):
-    """Types that support < comparison."""
-
-    def __add__(self: Arith, other: Any) -> Any:
-        """Add self and other."""
-        ...
-
-
-Ord = TypeVar('Ord', bound=Ordered)
-Arith = TypeVar('Arith', bound=Arithmetic)
 
 
 class IsNothing(Exception):
@@ -122,14 +99,14 @@ def _lift(f: Fn[..., _R]) -> Fn[..., Maybe[_R]]:
     return w
 
 
-class Maybe(Generic[_1]):
+class Maybe(Generic[_T]):
     """Maybe monad over T."""
 
-    def __rshift__(self, _f: Fn[[_1], Maybe[_R]]) -> Maybe[_R]:
+    def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         ...
 
-    def unwrap(self) -> _1:
+    def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         ...
 
@@ -146,33 +123,37 @@ class Maybe(Generic[_1]):
 
     _add = _lift(operator.add)
 
-    def __add__(self: Maybe[Arith], other: Maybe[_2]) -> Maybe[_R]:
+    def __add__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
         """Add self with other."""
         return self._add(other)
 
 
-class Some(Maybe[_1]):
+reveal_type(Maybe._add)
+reveal_type(Maybe.__add__)
+
+
+class Some(Maybe[_T]):
     """Objects containing values."""
 
-    _val: _1
+    _val: _T
 
-    def __init__(self, val: _1) -> None:
+    def __init__(self, val: _T) -> None:
         """Create a new monadic value."""
         self._val = val
 
     def __repr__(self) -> str:
-        """Get repr for Maybe[_1]."""
+        """Get repr for Maybe[_T]."""
         return f"Some({self._val})"
 
     def __bool__(self) -> bool:
         """Return true if val is true."""
         return bool(self._val)
 
-    def __rshift__(self, f: Fn[[_1], Maybe[_R]]) -> Maybe[_R]:
+    def __rshift__(self, f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         return f(self._val)
 
-    def unwrap(self) -> _1:
+    def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         return self._val
 
@@ -196,11 +177,11 @@ class Nothing_(Maybe[Any]):
         """Nothing is always false."""
         return False
 
-    def __rshift__(self, _f: Fn[[_1], Maybe[_R]]) -> Maybe[_R]:
+    def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         return Nothing
 
-    def unwrap(self) -> _1:
+    def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         raise IsNothing("tried to unwrap a Nothing value")
 

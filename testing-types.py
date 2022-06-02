@@ -1,11 +1,14 @@
+"""Testing type constructions."""
+
 from typing import (
-    TypeVar,
+    TypeVar, ParamSpec,
     Callable as Fn,
     Optional as Opt,
     Any,
     overload
 )
 from functools import wraps
+import math
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
@@ -14,6 +17,8 @@ _1 = TypeVar('_1')
 _2 = TypeVar('_2')
 _3 = TypeVar('_3')
 _4 = TypeVar('_4')
+
+_P = ParamSpec('_P')
 
 
 @overload
@@ -52,14 +57,31 @@ def lift(f: Fn[..., Opt[_R]]) -> Fn[..., Opt[_R]]:
     return w
 
 
-def f(x: _T) -> _T:
-    return x
+def catch_to_none(f: Fn[_P, _R]) -> Fn[_P, Opt[_R]]:
+    """Wrap a function so it returns None instead of an exception."""
+    @wraps(f)
+    def w(*args: _P.args, **kwargs: _P.kwargs) -> Opt[_R]:
+        try:
+            return f(*args, **kwargs)
+        except Exception:
+            return None
+    return w
 
 
-def apply(x: _T, f: Fn[[_T], _T]) -> Opt[_T]:
-    ff = lift(f)  # Lift's ff, but here _T will be bound to apply's _T
-    return ff(x)  # This will be Opt[_T] for the bound _T
+def roots(a: float, b: float, c: float) -> Opt[tuple[float, float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+
+    @catch_to_none
+    def sqrt(x: float) -> float:
+        return math.sqrt(x)
+
+    @catch_to_none  # We could divide by zero
+    @lift           # sq could be None
+    def _roots(sq: float) -> tuple[float, float]:
+        return (-b - sq) / (2*a), (-b + sq) / (2*a)
+
+    return _roots(sqrt(b**2 - 4*a*c))
 
 
-reveal_type(apply(12, f))      # An Opt[int] because x is int
-reveal_type(apply("foo", f))   # An Opt[str] because x is str
+x = roots(0, 0, 0)
+print(x)
