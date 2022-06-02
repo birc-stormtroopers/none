@@ -278,3 +278,87 @@ def swap_min_child(x: list[Ord], p: int) -> None:
 
 Using `lt(x,y)` instead of `x < y` is not too much to pay to avoid checking if indices are out of bounds or if values are `None`.
 
+Of course, even if you are using something like `lift`, it doesn't mean that you shouldn't use all the other features in the langauge. You can combine optional types with other features. There is nothing wrong with exceptions, for example, and you can use them together with `Opt[T]` values with something like this:
+
+```python
+def unwrap(x: Opt[_T]) -> _T:
+    """
+    Get the value for an optional or throw an exception.
+
+    It functions both as the unwrap() method and the ? operator
+    in Rust, except that to use it as ? you need to wrap expressions
+    in a try...except block at some call level (and the type
+    checker cannot check if you really do this).
+    """
+    if x is None:
+        raise IsNone()
+    return x
+```
+
+Whenever you ahve an `Opt[T]` value, the type checker should warn you if you use it without checking if it is `None`, but if you use `unwrap` you force the type to be `T` and get an exception if you are wrong. You can use that to handle errors if you want. Allow your variables to hold `Opt[T]` and `unwrap()` every time you use them. Then use a `try - except` block to catch if something went wrong.
+
+You could, for example, write a function that folds a function over `Opt[T]` values, skipping `None` output but returning `None` if the function ever produces a `None`.
+
+```python
+def fold(op: Fn[[_T, _T], Opt[_T]], *args: Opt[_T]) -> Opt[_T]:
+    """
+    Generalise a fold over the operator by tossing away None.
+
+    After we have removed all None we will return None if the
+    resulting list is empty, the singleton element if there is one,
+    and otherwise apply op to all the elements left to right.
+    If the op returns None at any point that is also the final
+    result.
+    """
+    try:  # try-block because of unwrap()
+
+        non_none = tuple(a for a in args if a is not None)
+        if not non_none:
+            return None
+
+        res = non_none[0]
+        for a in non_none[1:]:
+            res = unwrap(op(res, a))
+        return res
+
+    except IsNone:
+        return None
+```
+
+This combines a form of lifting with `unwrap()` and catching `IsNone` to implement the behaviour we want.
+
+We could use this `fold` combined with a `min` to get the smallest child of a node in a binary heap, and use that to swap.
+
+```python
+def get(x: list[_T], i: int) -> Opt[tuple[_T, int]]:
+    """Get value at index i if possible."""
+    try:
+        return (x[i], i)
+    except IndexError:
+        return None
+
+
+def swap_min_child(x: list[Ord], p: int) -> None:
+    """Swap node p with its smallest child."""
+    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    if lt(child, get(x, p)):
+        _, c = unwrap(child)  # If child < parent it can't be None
+        x[p], x[c] = x[c], x[p]
+```
+
+or
+
+```python
+def swap_min_child(x: list[Ord], p: int) -> None:
+    """Swap node p with its smallest child."""
+    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    try:
+        v, c = unwrap(child)
+        if v < x[p]:
+            x[p], x[c] = x[c], x[p]
+
+    except IsNone:
+        pass
+```
+
+using `unwrap()` and the exception once again.
