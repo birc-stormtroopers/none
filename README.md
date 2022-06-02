@@ -362,3 +362,209 @@ def swap_min_child(x: list[Ord], p: int) -> None:
 ```
 
 using `unwrap()` and the exception once again.
+
+
+
+## The `Maybe` monad
+
+When we are lifting, we are modifying functions to deal with `None`, but we are not touching the variables so we cannot change operators and such. This is somewhat because of how Python handles `None`, if it was a special type as in Rust rather than a tag-on `None` that goes into ever type, we might be able to do something. But as it is, `None` is in any type and we cannot easily wrap variables with extra type information. We can, however, define new types that captures "a type `T` and `None`".
+
+One approach to this is the `Maybe` monad. A monad is an idea from category theory that is used extensively in pure functional languages like Haskell. It is an abstract concept with many uses, from I/O to handling optinal values like we do here.
+
+A monad consists of an extended type `M[T]` (The monad `M` over type `T`) and two functions:
+
+The function `unit` or `return`
+
+```
+    unit: T -> M[T]
+```
+
+that sends a T value into the monad, and the function `bind` (I don't know why it has this name, it applies) that applies a function on a monad value
+
+```
+    bind: M[T] -> (T -> M[S]) -> M[S]
+```
+
+it takes a `M[T]` value, `a` and a function that sends a `T` value to `M[S]`, `f`, and then it gives us `f(a')` if `a'` is a `T` value underlying the `a` value in `M[T]` and something else in `M[S]` otherwise.
+
+To make it more concrete, let's say we have a type `T` and we want to handle something like `T` + `None`. We call the monad `Maybe` and it can have two types of values, `Some(a)` for values `a` from `T`, or `Nothing`.
+
+We can send `T` values into `Maybe[T]` with
+
+```python
+def unit(a: T) -> Maybe[T]:
+    return Some(a)
+```
+
+and if we want to apply (or bind) a function we have
+
+```python
+def bind(a: Maybe[T], f: Fn[[T], Maybe[S]]) -> Maybe[S]:
+    match a:
+        case Nothing:
+            return Nothing
+        case Some(a_):
+            return f(a_)
+```
+
+The `bind()` function is usually implemented as an infix
+operator, `>>=`, so we would apply it as
+
+```
+    a >>= lambda a_: Some(...)
+```
+
+or something to that effect. We can't use `>>=` in Python
+because that is only allowed as a statement, but we could
+use `>>`.
+
+You can implement it with a single class that checks what it wraps as a value, but I will implement an abstract `Maybe` class and two sub-classes, one for `Some()` and one for `Nothing`. The `Some()` constructor will work as `unit` and I make the `Nothing` class a singleton so there is only ever one `Nothing`.
+
+```python
+class Maybe(Generic[_T], ABC):
+    """Maybe monad over T."""
+
+    @abstractmethod
+    def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
+        """Bind and apply f."""
+        ...
+
+    @abstractmethod
+    def unwrap(self) -> _T:
+        """Return the wrapped value or raise an exception."""
+        ...
+
+class Some(Maybe[_T]):
+    """Objects containing values."""
+
+    _val: _T
+
+    def __init__(self, val: _T) -> None:
+        """Create a new monadic value."""
+        self._val = val
+
+    def __repr__(self) -> str:
+        """Get repr for Maybe[_T]."""
+        return f"Some({self._val})"
+
+    def __bool__(self) -> bool:
+        """Return true if val is true."""
+        return bool(self._val)
+
+    def __rshift__(self, f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
+        """Bind and apply f."""
+        return f(self._val)
+
+    def unwrap(self) -> _T:
+        """Return the wrapped value or raise an exception."""
+        return self._val
+
+class IsNothing(Exception):
+    """Exception raised if we try to get the value of Nothing."""
+
+class Nothing_(Maybe[Any]):
+    """Nothing to see here."""
+
+    _instance = None
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> Nothing_:
+        """Singleton pattern."""
+        if cls._instance is None:
+            cls._instance = object.__new__(cls, *args, **kwargs)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        """Nothing is nothing."""
+        return "Nothing"
+
+    def __bool__(self) -> bool:
+        """Nothing is always false."""
+        return False
+
+    def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
+        """Bind and apply f."""
+        return Nothing
+
+    def unwrap(self) -> _T:
+        """Return the wrapped value or raise an exception."""
+        raise IsNothing("tried to unwrap a Nothing value")
+
+Nothing = Nothing_() # the Nothing object
+```
+
+The idea with a monad is that you can string together a number of operations with the bind operator, and the monad takes care of handling additional information, like whether you have a `Nothing` or not. (It is, of course, much more general).
+
+```python
+x = Some(1) >> (lambda a: Some(2*a)) >> (lambda a: Some(-a))
+print(x)  # Some(-2)
+
+y = Nothing >> (lambda a: Some(2*a)) >> (lambda a: Some(-a))
+print(y)  # Nothing
+```
+
+Here, again, we are going to run into a problem with Python's type checkers--the type system isn't really grown up yet. The `lambda` expressions aren't typed, so these expressions are giving us `Maybe[Unknown]` types, which isn't type safe. To type the expressions we can wrap them in a class, where we can make the types explicit when the type checker cannot infer them.
+
+```python
+class F(Generic[_T, _R]):
+    """Wrap a callable _T -> Maybe[_R] so we can give it a type."""
+
+    def __init__(self, f: Fn[[_T], Maybe[_R]]) -> None:
+        """Wrap the callable f."""
+        self._f = f
+
+    def __call__(self, x: _T) -> Maybe[_R]:
+        """Invoke the function."""
+        return self._f(x)
+```
+
+Then we can give our lambda expressions types
+
+```python
+x = Some(12) >> \
+    F[int, int](lambda a: Some(2*a)) >> \
+    F[int, int](lambda a: Some(-a))
+print(x)  # Some(-24), Maybe[int]
+```
+
+We can still use plain functions if their types are know, though:
+
+```python
+def f(a: int) -> Maybe[int]:
+    return Some(2 * a)
+def neg(a: int) -> Maybe[int]:
+    return Some(-a)
+
+x = Some(12) >> f >> neg
+print(x)  # Some(-24), Maybe[int]
+```
+
+We could also combine such a function with a lift from `T -> R` to `T -> Maybe[R]` that we could also use as a decorator or for wrapping operators:
+
+```python
+class lift(Generic[_T, _R]):
+    """Lift a callable _T -> _R to _T -> Maybe[_R]."""
+
+    def __init__(self, f: Fn[[_T], _R]) -> None:
+        """Wrap the callable f."""
+        self._f = f
+
+    def __call__(self, x: _T) -> Maybe[_R]:
+        """Invoke the function."""
+        res = self._f(x)
+        return Nothing if res is None else Some(res)
+
+# lifting and wrapping lambdas
+x = Some(12) >> \
+    lift[int, int](lambda a: 2*a) >> \
+    lift[int, int](lambda a: -a)
+print(x)  # Some(-24), Maybe[int]
+
+# lifting a function as a decorator
+@lift
+def f(a: int) -> int:
+    return 2 * a
+
+# operator.neg is lifted to return a Maybe
+x = Some(12) >> f >> lift(operator.neg)
+print(x)  # Some(-24), Maybe[int]
+```

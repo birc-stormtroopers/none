@@ -1,9 +1,6 @@
 """Maybe monad."""
 
 from __future__ import annotations
-from protocols import (
-    Ord
-)
 
 from typing import (
     TypeVar,
@@ -14,7 +11,6 @@ from typing import (
 )
 
 from functools import wraps
-import operator
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')

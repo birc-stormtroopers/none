@@ -56,10 +56,11 @@ use >>.
 """
 
 from __future__ import annotations
-from inspect import (
-    signature
+
+from abc import (
+    ABC,
+    abstractmethod
 )
-import operator
 from typing import (
     TypeVar, ParamSpec,
     Generic,
@@ -70,6 +71,7 @@ from protocols import (
     Ord, Arith
 )
 from functools import wraps
+import operator
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
@@ -99,13 +101,15 @@ def _lift(f: Fn[..., _R]) -> Fn[..., Maybe[_R]]:
     return w
 
 
-class Maybe(Generic[_T]):
+class Maybe(Generic[_T], ABC):
     """Maybe monad over T."""
 
+    @abstractmethod
     def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         ...
 
+    @abstractmethod
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         ...
@@ -126,10 +130,6 @@ class Maybe(Generic[_T]):
     def __add__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
         """Add self with other."""
         return self._add(other)
-
-
-reveal_type(Maybe._add)
-reveal_type(Maybe.__add__)
 
 
 class Some(Maybe[_T]):
@@ -177,11 +177,11 @@ class Nothing_(Maybe[Any]):
         """Nothing is always false."""
         return False
 
-    def __rshift__(self, _f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
+    def __rshift__(self, _f: Fn[[Any], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         return Nothing
 
-    def unwrap(self) -> _T:
+    def unwrap(self) -> Any:
         """Return the wrapped value or raise an exception."""
         raise IsNothing("tried to unwrap a Nothing value")
 
@@ -189,43 +189,58 @@ class Nothing_(Maybe[Any]):
 Nothing = Nothing_()
 
 
-x: Maybe[int] = Some(1)
-y: Maybe[int] = Nothing
-print(x, y)
+class lift(Generic[_T, _R]):
+    """Lift a callable _T -> _R to _T -> Maybe[_R]."""
 
-z = x >> (lambda a: Some(2*a)) >> (lambda a: Some(-a))
-print(z)
+    def __init__(self, f: Fn[[_T], _R]) -> None:
+        """Wrap the callable f."""
+        self._f = f
 
-z = y >> (lambda a: Some(2*a)) >> (lambda a: Some(-a))
-print(z)
-
-
-# Try with lifting a function
-def mult13(x: int) -> int:
-    """Test function for lifting."""
-    return 13 * x
+    def __call__(self, x: _T) -> Maybe[_R]:
+        """Invoke the function."""
+        res = self._f(x)
+        return Nothing if res is None else Some(res)
 
 
-ƛ = _lift_ret
-z = x >> ƛ(mult13)
-print(z)
-z = y >> ƛ(mult13)
-print(z)
-
-# Operators require currying
-z = x >> (lambda a: y >> (lambda b: Some(a+b)))
-print(z)
-
-z = x >> (lambda a: x >> (lambda b: Some(a+b)))
-print(z)
-
-# Operator overloading
-print('sig lt', signature(Maybe.__lt__))
-print('sig add', signature(Maybe.__add__))
+x = Some(12) >> \
+    lift[int, int](lambda a: 2*a) >> \
+    lift[int, int](lambda a: -a)
+print(x)  # Some(-24), Maybe[int]
 
 
-print('add', x + x)
-print('add', x + y)
-print('lt', x < y)
-print('lt', z < x)
-print('lt', x < Some(12))
+@lift
+def f(a: int) -> int:
+    return 2 * a
+
+
+x = Some(12) >> f >> lift(operator.neg)
+print(x)  # Some(-24), Maybe[int]
+
+
+# # Try with lifting a function
+# def mult13(x: int) -> int:
+#     """Test function for lifting."""
+#     return 13 * x
+
+
+# ƛ = _lift_ret
+# z = x >> ƛ(mult13)
+# print(z)
+# z = y >> ƛ(mult13)
+# print(z)
+
+# # Operators require currying
+# z = x >> (lambda a: y >> (lambda b: Some(a+b)))
+# print(z)
+
+# z = x >> (lambda a: x >> (lambda b: Some(a+b)))
+# print(z)
+
+# # Operator overloading
+
+
+# print('add', x + x)
+# print('add', x + y)
+# print('lt', x < y)
+# print('lt', z < x)
+# print('lt', x < Some(12))
