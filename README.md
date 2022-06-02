@@ -617,9 +617,40 @@ class Maybe(Generic[_T], ABC):
 
         Add two numbers with
 
-        >>> Maybe.do(a - for a in Some(44) for b in Some(2))
+        >>> Maybe.do(a - b for a in Some(44) for b in Some(2))
         Some(42)
         """
-        return Some(next(expr))
+        try:
+            return Some(next(expr))
+        except IsNothing:
+            return Nothing
 ```
+
+The expressions we have in mind will iterate over one value per monad, so the generator expression should only produce a single value. We get that when we ask for `next(expr)`. Then we just have to wrap it. If there is a `Nothing` in any of the input monads, then unwrapping will raise `IsNothing`, which we catch and turn into a `Nothing`.
+
+With the `do` operator we can get close to the syntax we would use if we didn't have any `Nothing` at all, and were just writing Python code. Not quite there, but close enough that it might be worth it, just to not worry about special cases.
+
+This is true even for arithmetic heavy code. The roots of quadratic equations code illustrates this:
+
+```python
+def inv(x: float) -> Maybe[float]:
+    """Return 1/x if x != 0."""
+    return Nothing if x == 0 else Some(1/x)
+
+
+def sqrt(x: float) -> Maybe[float]:
+    """Compute the square root if x >= 0."""
+    return Some(math.sqrt(x)) if x >= 0 else Nothing
+
+
+def roots(a: float, b: float, c: float) -> Maybe[tuple[float, float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    return Maybe.do(
+        ((-b - sq) / i, (-b + sq) / i)
+        for i in inv(2 * a)
+        for sq in sqrt(b**2 - 4*a*c)
+    )
+```
+
+We still have to extract the problematic bits, inverting `2*a` and taking the square root, because these functions do not know about monads, but the expression in the `do` expression are reasonably readable now.
 

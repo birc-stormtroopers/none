@@ -71,8 +71,6 @@ from typing import (
 from protocols import (
     Ord, Arith
 )
-from functools import wraps
-import operator
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
@@ -81,25 +79,6 @@ _P = ParamSpec('_P')
 
 class IsNothing(Exception):
     """Exception raised if we try to get the value of Nothing."""
-
-
-def _lift_ret(f: Fn[_P, _R]) -> Fn[_P, Maybe[_R]]:
-    """Lift f to return a Maybe."""
-    @ wraps(f)
-    def w(*args: _P.args, **kwargs: _P.kwargs) -> Maybe[_R]:
-        return Some(f(*args, **kwargs))
-    return w
-
-
-def _lift(f: Fn[..., _R]) -> Fn[..., Maybe[_R]]:
-    """Lift f to work on Maybe."""
-    @ wraps(f)
-    def w(*args: Maybe[Any]) -> Maybe[_R]:
-        try:
-            return Some(f(*(a.unwrap() for a in args)))
-        except IsNothing:
-            return Nothing
-    return w
 
 
 class Maybe(Generic[_T], ABC):
@@ -126,27 +105,37 @@ class Maybe(Generic[_T], ABC):
 
         Add two numbers with
 
-        >>> Maybe.do(a - for a in Some(44) for b in Some(2))
+        >>> Maybe.do(a - b for a in Some(44) for b in Some(2))
         Some(42)
         """
-        return Some(next(expr))
+        try:
+            return Some(next(expr))
+        except IsNothing:
+            return Nothing
 
-    # FIXME: There is a bug in mypy https://github.com/python/mypy/issues/11167
-    # that prevents the propert type checking of wrapped types, so I cannot
-    # ensure that an operator is only valid if the underlying type supports it.
-    # The second I add an operator to this class, mypy thinks that all wrapped
-    # types support it. Stupid mypy!
-    _lt = _lift(operator.lt)
+    # Operator overloading. Type checking doesn't work with mypy, who thinks
+    # that any type is just fine even when self is constraint, but it does
+    # work with pyright/pylance.
 
     def __lt__(self: Maybe[Ord], other: Maybe[Ord]) -> Maybe[bool]:
-        """Compare with other."""
-        return self._lt(other)
-
-    _add = _lift(operator.add)
+        """Test less than, if _T is Ord."""
+        return Maybe.do(a < b for a in self for b in other)
 
     def __add__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
-        """Add self with other."""
-        return self._add(other)
+        """Add, if _T is Arith."""
+        return Maybe.do(a + b for a in self for b in other)
+
+    def __sub__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Add, if _T is Arith."""
+        return Maybe.do(a - b for a in self for b in other)
+
+    def __mul__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Multiply, if _T is Arith."""
+        return Maybe.do(a * b for a in self for b in other)
+
+    def __truediv__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Divide, if _T is Arith."""
+        return Maybe.do(a / b for a in self for b in other)  # FIXME: b==0?
 
 
 class Some(Maybe[_T]):
@@ -229,20 +218,3 @@ class lift(Generic[_T, _R]):
         """Invoke the function."""
         res = self._f(x)
         return Nothing if res is None else Some(res)
-
-
-# Operators require currying
-z = Maybe.do(a - b
-             for a in Some(44)
-             for b in Some(2))
-print(z)
-reveal_type(z)
-
-# # Operator overloading
-
-
-# print('add', x + x)
-# print('add', x + y)
-# print('lt', x < y)
-# print('lt', z < x)
-# print('lt', x < Some(12))
