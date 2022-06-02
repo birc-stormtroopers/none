@@ -14,7 +14,7 @@ from typing import (
 )
 
 from functools import wraps
-from operator import lt
+import operator
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
@@ -107,20 +107,38 @@ def fold(op: Fn[[_T, _T], Opt[_T]], *args: Opt[_T]) -> Opt[_T]:
 # Application... binary heap stuff...
 
 
-def get(x: list[_T], i: int) -> Opt[tuple[_T, int]]:
+# NB. Always False if any arg is None (it will just return None)
+lt = lift(operator.lt)
+
+
+def get(x: list[_T], i: int) -> Opt[_T]:
     """Get value at index i if possible."""
     try:
-        return (x[i], i)
+        return x[i]
     except IndexError:
         return None
 
 
 def swap_min_child(x: list[Ord], p: int) -> None:
     """Swap node p with its smallest child."""
-    child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
-    if lift(lt)(child, get(x, p)):
-        _, c = unwrap(child)  # If child < parent it can't be None
-        print('swapping parent and child...', p, '<->', c)
+    me, left, right = get(x, p), get(x, 2*p + 1), get(x, 2*p + 2)
+    if lt(left, me) and not lt(right, left):
+        x[2*p + 1], x[p] = x[p], x[2*p + 1]
+    if lt(right, me) and not lt(left, right):
+        x[2*p + 2], x[p] = x[p], x[2*p + 2]
+
+    # child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+    # if lift(lt)(child, get(x, p)):
+    #     _, c = unwrap(child)  # If child < parent it can't be None
+    #     print('swapping parent and child...', p, '<->', c)
+
+
+# def swap_min_child(x: list[Ord], p: int) -> None:
+#     """Swap node p with its smallest child."""
+#     child = fold(min, get(x, 2*p + 1), get(x, 2*p + 2))
+#     if lift(lt)(child, get(x, p)):
+#         _, c = unwrap(child)  # If child < parent it can't be None
+#         print('swapping parent and child...', p, '<->', c)
 
 
 x = [5.7, 2.1, 3.0, 3.2, 5.9, 6.0]

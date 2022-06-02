@@ -252,4 +252,29 @@ def roots(a: float, b: float, c: float) -> tuple[Opt[float], Opt[float]]:
 
 Some languages already use functions for operators, and then it wouldn't look at odd, but it does here. We can lift operators, though, but only through methods, and we will look at a solution that enables that in the next section.
 
+Right now, it might look like the lifting is completely useless, but I don't think it is. It just isn't the right solution for evaluating expressions, because we are used to operators for that, and we cannot easily lift operators. For arithmetic, that is a big deal, but for many algorithms it isn't.
+
+Consider swapping with the smallest child in a binary heap. There you need to get the two children of a node, and one or both might be `None`. So you have special cases there, that you would have to check for. Those cases follow you into comparing the node with the children to find the smallest child, and perhaps even into the swap. You can hide all of this if looking up a value in an array would give you `None` instead throwing an exception, and then having a less-than function, `lt`, that is only true for `lt(x,y)` if both `x` and `y` are non-None and `x < y`.
+
+```python
+# NB. Always False if any arg is None (it will just return None)
+lt = lift(operator.lt)
+
+def get(x: list[_T], i: int) -> Opt[_T]:
+    """Get value at index i if possible."""
+    try:
+        return x[i]
+    except IndexError:
+        return None
+
+def swap_min_child(x: list[Ord], p: int) -> None:
+    """Swap node p with its smallest child."""
+    me, left, right = get(x, p), get(x, 2*p + 1), get(x, 2*p + 2)
+    if lt(left, me) and not lt(right, left):
+        x[2*p + 1], x[p] = x[p], x[2*p + 1]
+    if lt(right, me) and not lt(left, right):
+        x[2*p + 2], x[p] = x[p], x[2*p + 2]
+```
+
+Using `lt(x,y)` instead of `x < y` is not too much to pay to avoid checking if indices are out of bounds or if values are `None`.
 
