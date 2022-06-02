@@ -62,6 +62,7 @@ from abc import (
     abstractmethod
 )
 from typing import (
+    Iterator, Generator,
     TypeVar, ParamSpec,
     Generic,
     Callable as Fn,
@@ -113,6 +114,22 @@ class Maybe(Generic[_T], ABC):
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         ...
+
+    # do syntactic sugar
+    def __iter__(self) -> Iterator[_T]:
+        """Let's us unwrap in a for-loop."""
+        yield self.unwrap()
+
+    @classmethod
+    def do(cls, expr: Generator[_R, None, None]) -> Maybe[_R]:
+        """Evaluate do-expression.
+
+        Add two numbers with
+
+        >>> Maybe.do(a - for a in Some(44) for b in Some(2))
+        Some(42)
+        """
+        return Some(next(expr))
 
     # FIXME: There is a bug in mypy https://github.com/python/mypy/issues/11167
     # that prevents the propert type checking of wrapped types, so I cannot
@@ -189,6 +206,18 @@ class Nothing_(Maybe[Any]):
 Nothing = Nothing_()
 
 
+class Fun(Generic[_T, _R]):
+    """Wrap a callable _T -> Maybe[_R] so we can give it a type."""
+
+    def __init__(self, f: Fn[[_T], Maybe[_R]]) -> None:
+        """Wrap the callable f."""
+        self._f = f
+
+    def __call__(self, x: _T) -> Maybe[_R]:
+        """Invoke the function."""
+        return self._f(x)
+
+
 class lift(Generic[_T, _R]):
     """Lift a callable _T -> _R to _T -> Maybe[_R]."""
 
@@ -202,39 +231,12 @@ class lift(Generic[_T, _R]):
         return Nothing if res is None else Some(res)
 
 
-x = Some(12) >> \
-    lift[int, int](lambda a: 2*a) >> \
-    lift[int, int](lambda a: -a)
-print(x)  # Some(-24), Maybe[int]
-
-
-@lift
-def f(a: int) -> int:
-    return 2 * a
-
-
-x = Some(12) >> f >> lift(operator.neg)
-print(x)  # Some(-24), Maybe[int]
-
-
-# # Try with lifting a function
-# def mult13(x: int) -> int:
-#     """Test function for lifting."""
-#     return 13 * x
-
-
-# ƛ = _lift_ret
-# z = x >> ƛ(mult13)
-# print(z)
-# z = y >> ƛ(mult13)
-# print(z)
-
-# # Operators require currying
-# z = x >> (lambda a: y >> (lambda b: Some(a+b)))
-# print(z)
-
-# z = x >> (lambda a: x >> (lambda b: Some(a+b)))
-# print(z)
+# Operators require currying
+z = Maybe.do(a - b
+             for a in Some(44)
+             for b in Some(2))
+print(z)
+reveal_type(z)
 
 # # Operator overloading
 

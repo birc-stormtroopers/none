@@ -410,7 +410,7 @@ def bind(a: Maybe[T], f: Fn[[T], Maybe[S]]) -> Maybe[S]:
 The `bind()` function is usually implemented as an infix
 operator, `>>=`, so we would apply it as
 
-```
+```haskell
     a >>= lambda a_: Some(...)
 ```
 
@@ -505,7 +505,7 @@ print(y)  # Nothing
 Here, again, we are going to run into a problem with Python's type checkers--the type system isn't really grown up yet. The `lambda` expressions aren't typed, so these expressions are giving us `Maybe[Unknown]` types, which isn't type safe. To type the expressions we can wrap them in a class, where we can make the types explicit when the type checker cannot infer them.
 
 ```python
-class F(Generic[_T, _R]):
+class Fun(Generic[_T, _R]):
     """Wrap a callable _T -> Maybe[_R] so we can give it a type."""
 
     def __init__(self, f: Fn[[_T], Maybe[_R]]) -> None:
@@ -521,8 +521,8 @@ Then we can give our lambda expressions types
 
 ```python
 x = Some(12) >> \
-    F[int, int](lambda a: Some(2*a)) >> \
-    F[int, int](lambda a: Some(-a))
+    Fun[int, int](lambda a: Some(2*a)) >> \
+    Fun[int, int](lambda a: Some(-a))
 print(x)  # Some(-24), Maybe[int]
 ```
 
@@ -568,3 +568,58 @@ def f(a: int) -> int:
 x = Some(12) >> f >> lift(operator.neg)
 print(x)  # Some(-24), Maybe[int]
 ```
+
+A pipeline like this is quite convinient when you have data flowing through a sequence of function calls, that doesn't happen that often outside of data science projects. Usually, we have functions that take more than one argument, and here the notation gets a little cumbersome. You will have to curry the computation and bind functions inside other functions. Here is how you add two numbers with a plain monad:
+
+```python
+# (x, y) -> x + y === x -> y -> x+y
+x = Some(12)
+y = Some(30)
+z: Maybe[int] =  \
+    x >> (lambda a:  # a is the value in x
+          y >> (lambda b:  # b is the value in y
+                Some(a+b)))  # return their sum
+print(z)  # Maybe[42], Maybe[int]
+```
+
+You can get used to code like that. It looks a little better without the comments, actually
+
+```python
+z: Maybe[int] = x >> (lambda a: y >> (lambda b: Some(a+b)))
+```
+
+but it doesn't look like natural Python code, and it isn't easy to read in languages where this kind of code comes natural either. 
+
+Haskell has built-in syntactic sugar that lets  you unwrap a sequence of monads and then do a computation, but we don't have that in Python. That won't stop us from implementing it, though; we are just a little limited in the kind of syntacs we can define. But we can get something that looks like this:
+
+```python
+z = Maybe.do(a - b 
+             for a in Some(44)
+             for b in Some(2))
+```
+
+where you can unwrap any number of monads by adding more `for ... in ...` lines. Something like this is called a generator expression, and we can write a function that takes one and evaluates it. We need two parts, the part that evaluates the generator expression, and the part that lets us iterate over a monad. Both are quite simple:
+
+```python
+class Maybe(Generic[_T], ABC):
+    """Maybe monad over T."""
+
+    ...
+
+    # do syntactic sugar
+    def __iter__(self) -> Iterator[_T]:
+        """Let's us unwrap in a for-loop."""
+        yield self.unwrap()
+
+    @classmethod
+    def do(cls, expr: Generator[_R, None, None]) -> Maybe[_R]:
+        """Evaluate do-expression.
+
+        Add two numbers with
+
+        >>> Maybe.do(a - for a in Some(44) for b in Some(2))
+        Some(42)
+        """
+        return Some(next(expr))
+```
+
