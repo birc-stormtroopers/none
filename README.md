@@ -434,6 +434,18 @@ class Maybe(Generic[_T], ABC):
         """Return the wrapped value or raise an exception."""
         ...
 
+    @property
+    @abstractmethod
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        ...
+
+    @property
+    @abstractmethod
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
+        ...
+
 class Some(Maybe[_T]):
     """Objects containing values."""
 
@@ -458,6 +470,17 @@ class Some(Maybe[_T]):
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         return self._val
+
+    @property
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        return True
+
+    @property
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
+        return False
+
 
 class IsNothing(Exception):
     """Exception raised if we try to get the value of Nothing."""
@@ -488,6 +511,17 @@ class Nothing_(Maybe[Any]):
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         raise IsNothing("tried to unwrap a Nothing value")
+
+    @property
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        return False
+
+    @property
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
+        return True
+
 
 Nothing = Nothing_() # the Nothing object
 ```
@@ -875,5 +909,102 @@ def swap_down(p: int, x: MList[Ord]) -> None:
         x[p], x[2*p + 2] = x[2*p + 2], x[p]
 ```
 
-We have moved a little away from the error-checking-free code again, but that is better than having expressions that do not mean what they appear to mean. And sometimes we simply cannot completely hide that we are working with a `Maybe`-monad completely, especially when we need to treat `Nothing` differntly.
+We have moved a little away from the error-checking-free code again, but that is better than having expressions that do not mean what they appear to mean. And sometimes we simply cannot completely hide that we are working with a `Maybe`-monad completely, especially when we need to treat `Nothing` differently.
+
+Related to `unwrap_or()` we might want expressions where we stay in the `Maybe` domain, but want to have an alternative to `Nothing`. A good name for such a function would be `or()` but that is a keyword in Python. So let's just use the operator `|` otherwise used for bit-wise or:
+
+```python
+    # Maybe
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        ...
+
+    # Some
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        return self._val
+
+    # Nothing
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        return other
+```
+
+We can use this for a "maybe min" function that gives us the smalleset of two values, or the non-`Nothing` value if there is one, or `Nothing` if that is all the input is.
+
+```python
+def maybe_min(x: Maybe[Ord], y: Maybe[Ord]) -> Maybe[Ord]:
+    """
+    Get min of x and y.
+
+    If one of the two is Nothing, we get the other.
+    """
+    # If both arguments are Some, then we get the smallest
+    return Maybe.do(
+        b if b < a else a
+        for a in x for b in y
+    ) | x | y
+    # otherwise we pick the first non-Nothing or we end up with Nothing
+```
+
+With a little bit of rewriting we can get another version of `swap_down()`--this time one that loops until we are done swapping--that looks like this:
+
+```python
+_1 = TypeVar('_1')
+_2 = TypeVar('_2')
+
+
+def pair(first: Maybe[_1], second: Maybe[_2]) -> Maybe[tuple[_1, _2]]:
+    """Turn a pair of Maybe into a Maybe pair."""
+    return Maybe.do((a, b) for a in first for b in second)
+
+
+def get_index(x: MList[_T], i: int) -> Maybe[tuple[_T, int]]:
+    """Get an array value together with its index."""
+    return pair(x[i], Some(i))
+
+
+def maybe_min(x: Maybe[Ord], y: Maybe[Ord]) -> Maybe[Ord]:
+    """
+    Get min of x and y.
+
+    If one of the two is Nothing, we get the other.
+    """
+    # If both arguments are Some, then we get the smallest
+    return Maybe.do(
+        b if b < a else a
+        for a in x for b in y
+    ) | x | y
+    # otherwise we pick the first non-Nothing or we end up with Nothing
+
+
+def swap(x: MList[Ord], i: int, j: int) -> int:
+    """Swap indices i and j, return new index for i."""
+    x[i], x[j] = x[j], x[i]
+    return j
+
+
+def swap_down(p: int, x: MList[Ord]) -> None:
+    """Swap p down if a child is smaller."""
+    i = Some(p)
+    while i.is_some:
+        i = Maybe.do(
+            # Swap parent and child if child is smaller, return the
+            # index we swap to if we swap, so we can continue from there.
+            # If we don't swap, return Nothing.
+            swap(x, my_idx, child_idx) if child_val < my_val else Nothing
+
+            for my_val, my_idx in get_index(x, p)
+            for child_val, child_idx in maybe_min(get_index(x, 2*p + 1),
+                                                  get_index(x, 2*p + 2))
+        )
+```
+
+It works by wrapping up into a pair the index and value of an array. With the value first, we can get the smaller value, and remember its index, by taking `min`, or in this case `maybe_min` since the value at an index might not exist. Then, working with the `Maybe` monad, we can get the current index and the two child indices, get the smallest of the children, and swap the two if the child is smaller than the parent.
+
+There are some limitations in what code we can write in a `do` operation, because it has to be a generator expression, so the actual swap has to go into a separate function, but otherwise I think the code is reasonably easy to read.
+
+It is a bit backwards compared to usual Python code, when we assign the variables after the expression in the `do` statement, but with a little practise, you can get used to it. If you are familiar with some functional languages, it doesn't look quite as odd; there you often have constructions for defining variables after the result of a function.
+
+But the readability isn't the main point here. We want something where the type explicitly encodes the special cases--in this case that we might index something that doesn't exit--and that will hide away the various special cases because of it. Here, either child could be outside of the array, so there are two children that we would need to deal with special cases for. This is now entirely hidden in the `MList` class and the `pairs` function. The `maybe_min` function also needs to consider the special cases, because it can't just propagate `Nothing` but must choose what to do if one of the input are `Nothing` but the other isn't. This, however, is something you can easily write a wrapper for, similar to `lift`. Then an explicit wrap, or a decorator, will hide this from you as well.
 

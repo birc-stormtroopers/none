@@ -97,8 +97,26 @@ class Maybe(Generic[_T], ABC):
         """Return the wrapped value or raise an exception."""
         ...
 
+    @abstractmethod
     def unwrap_or(self, _x: _T) -> _T:
         """Return the wrapped value or give us x if it is Nothing."""
+        ...
+
+    @abstractmethod
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        ...
+
+    @property
+    @abstractmethod
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        ...
+
+    @property
+    @abstractmethod
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
         ...
 
     def __bool__(self) -> bool:
@@ -196,6 +214,16 @@ class Some(Maybe[_T]):
         """Bind and apply f."""
         return f(self._val)
 
+    @property
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        return True
+
+    @property
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
+        return False
+
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         return self._val
@@ -203,6 +231,10 @@ class Some(Maybe[_T]):
     def unwrap_or(self, _x: _T) -> _T:
         """Return the wrapped value or give us x if it is Nothing."""
         return self._val
+
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        return self
 
 
 class Nothing_(Maybe[Any]):
@@ -224,6 +256,16 @@ class Nothing_(Maybe[Any]):
         """Bind and apply f."""
         return Nothing
 
+    @property
+    def is_some(self) -> bool:
+        """Return true if we hold a value, otherwise false."""
+        return False
+
+    @property
+    def is_nothing(self) -> bool:
+        """Return true if we do not hold a value, otherwise false."""
+        return True
+
     def unwrap(self) -> Any:
         """Return the wrapped value or raise an exception."""
         raise IsNothing("tried to unwrap a Nothing value")
@@ -231,6 +273,10 @@ class Nothing_(Maybe[Any]):
     def unwrap_or(self, _x: _T) -> _T:
         """Return the wrapped value or give us x if it is Nothing."""
         return _x
+
+    def __or__(self, other: Maybe[_T]) -> Maybe[_T]:
+        """Return self if it is Some, otherwise other."""
+        return other
 
 
 Nothing: Final = Nothing_()
