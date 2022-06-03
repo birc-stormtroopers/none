@@ -773,3 +773,107 @@ def roots(a_: float, b_: float, c_: float
 
 We are getting closer to how we would write the code in plain Python without any error handling. The `Some(-)` wrapping is the only thing that distinguishes this from working with plain `float`, and if you work at little more at the operators you can make them accept more types. You can't dispatch on type, so you need to explicitly check the types, but that is all you would need. I'm just too lazy for that right now.
 
+Wrapping back to the binomial heap for another example of using a `Maybe`, we could wrap sequences so they could work with `Maybe`:
+
+```python
+class MList(Generic[_T]):
+    """Wrapping a sequence so it returns Maybe."""
+
+    _seq: MutableSequence[_T]
+
+    def __init__(self, seq: MutableSequence[_T]) -> None:
+        """Wrap seq in an MList."""
+        self._seq = seq
+
+    def __getitem__(self, i: int) -> Maybe[_T]:
+        """Return self[i] if possible."""
+        return Some(self._seq[i]) \
+            if 0 <= i < len(self._seq) \
+            else Nothing
+
+    def __setitem__(self, i: int, val: Maybe[_T]) -> None:
+        """Set self[i] to val if Some and possible."""
+        if 0 <= i < len(self._seq):
+            try:
+                self._seq[i] = val.unwrap()
+            except IsNothing:
+                pass
+```
+
+and then implement the swap code without explicitly dealing with special cases at all:
+
+```python
+def swap_down(p: int, x: MList[Ord]) -> None:
+    """Swap p down if a child is smaller."""
+    me, left, right = x[p], x[2*p + 1], x[2*p + 2]
+    if left < me and not right < left:
+        x[p], x[2*p + 1] = x[2*p + 1], x[p]
+    if right < me and not left < right:
+        x[p], x[2*p + 2] = x[2*p + 2], x[p]
+```
+
+The weird expression `right < me and not left < right` with a `not ... < ...` is not as natural as `right < me and right < left`, but it is necessary here. Our lifted `<` will return `Nothing` which evaluates to `False` whenever either element is `Nothing` and that is an issue.
+
+We have gotten rid of handling special cases, and we are even doing it type-safe (with the right checker), but at sizable cost. If boolean expressions don't mean what they usually do, it is *very* easy to make mistakes. We probably don't want that.
+
+It makes sense to lift code from `T x S -> R` to `Maybe[T] x Maybe[S] -> Maybe[R]` in many cases, but not when the domain `R` is something we could confuse for `Nothing`.
+
+We don't want `Maybe` to function as a boolean, so let's fix that. I don't think we can remove `__bool__()` from an object to tell the type checker that it cannot use an object as a boolean. All objects can be used as type values. But we can raise a runtime exception if it happens.
+
+```python
+    def __bool__(self) -> bool:
+        """Make sure we don't use a Maybe as a bool."""
+        assert False, "A Maybe is not a truth-value."
+        return False
+```
+
+Frustratingly, the type checker doesn't complain that we *do* use `Maybe` as a boolean, but the `swap_down()` function will crash.
+
+Let's go back and check what the problem is. In the expression, we want `left < me` to be true if both `left` and `me` have values and `left.unwrap() < me.unwrap()`. We want `left < right` to be true if `right` is `Nothing` or if `left.unwrap() < right.unwrap()`. We are trying to give `<` different meanings depending on where we use it, and that is the problem here. We need to take control over `Nothing`.
+
+We can get this control with an alternative `unwrap()` function, `unwrap_or()`, that either gives us the wrapped value or one we provide.
+
+```python
+class Maybe(Generic[_T], ABC):
+    """Maybe monad over T."""
+
+    ...
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
+        ...
+
+
+class Some(Maybe[_T]):
+    """Objects containing values."""
+
+    ...
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
+        return self._val
+
+class Nothing_(Maybe[Any]):
+    """Nothing to see here."""
+
+    ...
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
+        return _x
+```
+
+If we want `left < me and left < right` to be `True` if `left` and `me` exists and `left.unwrap() < me.unwrap()`, then `(left < me).unwrap_or(False)` will do the trick. If we want `left < right` to be true, when we know that `left` holds a value, if either `right` is `Nothing` or both have a value where `left.unwrap() < right.unwrap()`, then `(left < right).unwrap_or(True)` will do the trick.
+
+```python
+def swap_down(p: int, x: MList[Ord]) -> None:
+    """Swap p down if a child is smaller."""
+    me, left, right = x[p], x[2*p + 1], x[2*p + 2]
+    if (left < me).unwrap_or(False) and (left < right).unwrap_or(True):
+        x[p], x[2*p + 1] = x[2*p + 1], x[p]
+    if (right < me).unwrap_or(False) and (right < left).unwrap_or(True):
+        x[p], x[2*p + 2] = x[2*p + 2], x[p]
+```
+
+We have moved a little away from the error-checking-free code again, but that is better than having expressions that do not mean what they appear to mean. And sometimes we simply cannot completely hide that we are working with a `Maybe`-monad completely, especially when we need to treat `Nothing` differntly.
+

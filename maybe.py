@@ -70,11 +70,14 @@ from typing import (
     Any,
 )
 from protocols import (
-    Ord, Arith
+    Ord, Arith,
 )
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
+
+_K = TypeVar('_K')
+_V = TypeVar('_V')
 
 
 class IsNothing(Exception):
@@ -93,6 +96,15 @@ class Maybe(Generic[_T], ABC):
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
         ...
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
+        ...
+
+    def __bool__(self) -> bool:
+        """Make sure we don't use a Maybe as a bool."""
+        assert False, "A Maybe is not a truth-value."
+        return False
 
     # do syntactic sugar
     def __iter__(self) -> Iterator[_T]:
@@ -129,10 +141,12 @@ class Maybe(Generic[_T], ABC):
     # that any type is just fine even when self is constraint, but it does
     # work with pyright/pylance.
 
+    # Some comparison operators...
     def __lt__(self: Maybe[Ord], other: Maybe[Ord]) -> Maybe[bool]:
         """Test less than, if _T is Ord."""
         return Maybe.do(a < b for a in self for b in other)
 
+    # Some arithmetic operators...
     def __neg__(self: Maybe[Arith]) -> Maybe[Arith]:
         """-self."""
         return Maybe.do(-a for a in self)
@@ -178,16 +192,16 @@ class Some(Maybe[_T]):
         """Get repr for Maybe[_T]."""
         return f"Some({self._val})"
 
-    def __bool__(self) -> bool:
-        """Return true if val is true."""
-        return bool(self._val)
-
     def __rshift__(self, f: Fn[[_T], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         return f(self._val)
 
     def unwrap(self) -> _T:
         """Return the wrapped value or raise an exception."""
+        return self._val
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
         return self._val
 
 
@@ -206,10 +220,6 @@ class Nothing_(Maybe[Any]):
         """Nothing is nothing."""
         return "Nothing"
 
-    def __bool__(self) -> bool:
-        """Nothing is always false."""
-        return False
-
     def __rshift__(self, _f: Fn[[Any], Maybe[_R]]) -> Maybe[_R]:
         """Bind and apply f."""
         return Nothing
@@ -217,6 +227,10 @@ class Nothing_(Maybe[Any]):
     def unwrap(self) -> Any:
         """Return the wrapped value or raise an exception."""
         raise IsNothing("tried to unwrap a Nothing value")
+
+    def unwrap_or(self, _x: _T) -> _T:
+        """Return the wrapped value or give us x if it is Nothing."""
+        return _x
 
 
 Nothing: Final = Nothing_()

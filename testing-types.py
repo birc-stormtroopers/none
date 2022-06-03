@@ -1,87 +1,53 @@
 """Testing type constructions."""
 
 from typing import (
-    TypeVar, ParamSpec,
-    Callable as Fn,
-    Optional as Opt,
-    Any,
-    overload
+    TypeVar, Generic,
 )
-from functools import wraps
-import math
+from collections.abc import (
+    MutableSequence
+)
+from maybe import (
+    Maybe, Some, Nothing, IsNothing
+)
+from protocols import (
+    Ord,
+)
 
-_T = TypeVar('_T')
-_R = TypeVar('_R')
-
-_1 = TypeVar('_1')
-_2 = TypeVar('_2')
-_3 = TypeVar('_3')
-_4 = TypeVar('_4')
-
-_P = ParamSpec('_P')
-
-
-@overload
-def lift(f: Fn[[_1], Opt[_R]]) -> Fn[[Opt[_1]], Opt[_R]]:
-    """Lift function f."""
-    ...
+_T = TypeVar("_T")
 
 
-@overload
-def lift(f: Fn[[_1, _2], Opt[_R]]) -> Fn[[Opt[_1], Opt[_2]], Opt[_R]]:
-    """Lift function f."""
-    ...
+class MList(Generic[_T]):
+    """Wrapping a sequence so it returns Maybe."""
+
+    _seq: MutableSequence[_T]
+
+    def __init__(self, seq: MutableSequence[_T]) -> None:
+        """Wrap seq in an MList."""
+        self._seq = seq
+
+    def __getitem__(self, i: int) -> Maybe[_T]:
+        """Return self[i] if possible."""
+        return Some(self._seq[i]) \
+            if 0 <= i < len(self._seq) \
+            else Nothing
+
+    def __setitem__(self, i: int, val: Maybe[_T]) -> None:
+        """Set self[i] to val if Some and possible."""
+        if 0 <= i < len(self._seq):
+            try:
+                self._seq[i] = val.unwrap()
+            except IsNothing:
+                pass
 
 
-@overload
-def lift(f: Fn[[_1, _2, _3], Opt[_R]]) \
-        -> Fn[[Opt[_1], Opt[_2], Opt[_3]], Opt[_R]]:
-    """Lift function f."""
-    ...
+def swap_down(p: int, x: MList[Ord]) -> None:
+    """Swap p down if a child is smaller."""
+    me, left, right = x[p], x[2*p + 1], x[2*p + 2]
+    if (left < me).unwrap_or(False) and (left < right).unwrap_or(True):
+        x[p], x[2*p + 1] = x[2*p + 1], x[p]
+    if (right < me).unwrap_or(False) and (right < left).unwrap_or(True):
+        x[p], x[2*p + 2] = x[2*p + 2], x[p]
 
 
-@overload
-def lift(f: Fn[[_1, _2, _3, _4], Opt[_R]]) \
-        -> Fn[[Opt[_1], Opt[_2], Opt[_3], Opt[_4]], Opt[_R]]:
-    """Lift function f."""
-    ...
-
-
-def lift(f: Fn[..., Opt[_R]]) -> Fn[..., Opt[_R]]:
-    """Lift a generic function."""
-    @wraps(f)
-    def w(*args: Any, **kwargs: Any) -> Opt[_R]:
-        if None in args or None in kwargs.values():
-            return None
-        return f(*args, **kwargs)
-    return w
-
-
-def catch_to_none(f: Fn[_P, _R]) -> Fn[_P, Opt[_R]]:
-    """Wrap a function so it returns None instead of an exception."""
-    @wraps(f)
-    def w(*args: _P.args, **kwargs: _P.kwargs) -> Opt[_R]:
-        try:
-            return f(*args, **kwargs)
-        except Exception:
-            return None
-    return w
-
-
-def roots(a: float, b: float, c: float) -> Opt[tuple[float, float]]:
-    """Get the roots of the quadratic equation ax**2 + bx + c."""
-
-    @catch_to_none
-    def sqrt(x: float) -> float:
-        return math.sqrt(x)
-
-    @catch_to_none  # We could divide by zero
-    @lift           # sq could be None
-    def _roots(sq: float) -> tuple[float, float]:
-        return (-b - sq) / (2*a), (-b + sq) / (2*a)
-
-    return _roots(sqrt(b**2 - 4*a*c))
-
-
-x = roots(0, 0, 0)
-print(x)
+x = MList([3, 1, 2, 4, 6])
+swap_down(0, x)
