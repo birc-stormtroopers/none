@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import (
     TypeVar,
     Protocol,
-    Any,
 )
 
 
@@ -23,19 +22,31 @@ Ord = TypeVar('Ord', bound=Ordered)
 class Arithmetic(Protocol):
     """Types that support < comparison."""
 
-    def __add__(self: Arith, other: Arith, /) -> Any:
+    def __neg__(self: Arith, /) -> Arith:
+        """-self."""
+        ...
+
+    def __add__(self: Arith, other: Arith, /) -> Arith:
         """Add self and other."""
         ...
 
-    def __sub__(self: Arith, other: Arith, /) -> Any:
+    def __sub__(self: Arith, other: Arith, /) -> Arith:
         """Subtract other from self."""
         ...
 
-    def __mul__(self: Arith, other: Arith, /) -> Any:
+    def __mul__(self: Arith, other: Arith, /) -> Arith:
         """Multiply self and other."""
         ...
 
-    def __truediv__(self: Arith, other: Arith, /) -> Any:
+    def __pow__(self: Arith, other: Arith, /) -> Arith:
+        """Raise self to other."""
+        ...
+
+    def __truediv__(self: Arith, other: Arith, /) -> Arith:
+        """Divide self by other."""
+        ...
+
+    def __floordiv__(self: Arith, other: Arith, /) -> Arith:
         """Divide self by other."""
         ...
 

@@ -12,20 +12,17 @@ _T = TypeVar('_T')
 _R = TypeVar('_R')
 
 
-def inv(x: float) -> Maybe[float]:
-    """Return 1/x if x != 0."""
-    return Nothing if x == 0 else Some(1/x)
-
-
-def sqrt(x: float) -> Maybe[float]:
+def sqrt(x: Maybe[float]) -> Maybe[float]:
     """Compute the square root if x >= 0."""
-    return Some(math.sqrt(x)) if x >= 0 else Nothing
-
-
-def roots(a: float, b: float, c: float) -> Maybe[tuple[float, float]]:
-    """Get the roots of the quadratic equation ax**2 + bx + c."""
     return Maybe.do(
-        ((-b - sq) / i, (-b + sq) / i)
-        for i in inv(2 * a)
-        for sq in sqrt(b**2 - 4*a*c)
+        Some(math.sqrt(a)) if a >= 0 else Nothing
+        for a in x
     )
+
+
+def roots(a_: float, b_: float, c_: float
+          ) -> tuple[Maybe[float], Maybe[float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    a, b, c = Some(a_), Some(b_), Some(c_)
+    sq = sqrt(b**Some(2.0) - Some(4.0)*a*c)
+    return ((-b - sq) / (Some(2.0)*a), (-b + sq) / (Some(2.0)*a))

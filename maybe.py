@@ -63,9 +63,10 @@ from abc import (
 )
 from typing import (
     Iterator, Generator,
-    TypeVar, ParamSpec,
+    TypeVar,
     Generic,
     Callable as Fn,
+    Final,
     Any,
 )
 from protocols import (
@@ -74,7 +75,6 @@ from protocols import (
 
 _T = TypeVar('_T')
 _R = TypeVar('_R')
-_P = ParamSpec('_P')
 
 
 class IsNothing(Exception):
@@ -100,16 +100,28 @@ class Maybe(Generic[_T], ABC):
         yield self.unwrap()
 
     @classmethod
-    def do(cls, expr: Generator[_R, None, None]) -> Maybe[_R]:
+    def do(cls, expr: Generator[_R | Maybe[_R], None, None]) -> Maybe[_R]:
         """Evaluate do-expression.
 
         Add two numbers with
 
         >>> Maybe.do(a - b for a in Some(44) for b in Some(2))
         Some(42)
+
+        If the expression evaluates to a Maybe, we don't lift it but
+        propagate it as it is:
+
+        >>> Maybe.do(Nothing if b == 0 else Some(a/b)
+        ...          for a in Some(44) for b in Some(0))
+        Nothing
+        >>> Maybe.do(Nothing if b == 0 else Some(a/b)
+        ...          for a in Some(44) for b in Some(2))
+        Some(22.0)
+
         """
         try:
-            return Some(next(expr))
+            res = next(expr)
+            return res if isinstance(res, Maybe) else Some(res)
         except IsNothing:
             return Nothing
 
@@ -120,6 +132,10 @@ class Maybe(Generic[_T], ABC):
     def __lt__(self: Maybe[Ord], other: Maybe[Ord]) -> Maybe[bool]:
         """Test less than, if _T is Ord."""
         return Maybe.do(a < b for a in self for b in other)
+
+    def __neg__(self: Maybe[Arith]) -> Maybe[Arith]:
+        """-self."""
+        return Maybe.do(-a for a in self)
 
     def __add__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
         """Add, if _T is Arith."""
@@ -133,15 +149,26 @@ class Maybe(Generic[_T], ABC):
         """Multiply, if _T is Arith."""
         return Maybe.do(a * b for a in self for b in other)
 
+    def __pow__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Raise self to other."""
+        return Maybe.do(a**b for a in self for b in other)
+
     def __truediv__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
         """Divide, if _T is Arith."""
-        return Maybe.do(a / b for a in self for b in other)  # FIXME: b==0?
+        return Maybe.do(Nothing if b == 0 else Some(a/b)
+                        for a in self for b in other)
+
+    def __floordiv__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Divide, if _T is Arith."""
+        return Maybe.do(Nothing if b == 0 else Some(a//b)
+                        for a in self for b in other)
 
 
 class Some(Maybe[_T]):
     """Objects containing values."""
 
     _val: _T
+    __match_args__ = ('_val')
 
     def __init__(self, val: _T) -> None:
         """Create a new monadic value."""
@@ -192,7 +219,7 @@ class Nothing_(Maybe[Any]):
         raise IsNothing("tried to unwrap a Nothing value")
 
 
-Nothing = Nothing_()
+Nothing: Final = Nothing_()
 
 
 class Fun(Generic[_T, _R]):
@@ -207,7 +234,7 @@ class Fun(Generic[_T, _R]):
         return self._f(x)
 
 
-class lift(Generic[_T, _R]):
+class lift(Generic[_T, _R]):  # noqa: N801
     """Lift a callable _T -> _R to _T -> Maybe[_R]."""
 
     def __init__(self, f: Fn[[_T], _R]) -> None:

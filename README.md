@@ -612,21 +612,32 @@ class Maybe(Generic[_T], ABC):
         yield self.unwrap()
 
     @classmethod
-    def do(cls, expr: Generator[_R, None, None]) -> Maybe[_R]:
+    def do(cls, expr: Generator[_R | Maybe[_R], None, None]) -> Maybe[_R]:
         """Evaluate do-expression.
 
         Add two numbers with
 
         >>> Maybe.do(a - b for a in Some(44) for b in Some(2))
         Some(42)
+
+        If the expression evaluates to a Maybe, we don't lift it but
+        propagate it as it is:
+
+        >>> Maybe.do(Nothing if b == 0 else Some(a/b)
+        ...          for a in Some(44) for b in Some(0))
+        Nothing
+        >>> Maybe.do(Nothing if b == 0 else Some(a/b)
+        ...          for a in Some(44) for b in Some(2))
+        Some(22.0)
+
         """
-        try:
-            return Some(next(expr))
-        except IsNothing:
-            return Nothing
+        res = next(expr)
+        return res if isinstance(res, Maybe) else Some(res)
 ```
 
-The expressions we have in mind will iterate over one value per monad, so the generator expression should only produce a single value. We get that when we ask for `next(expr)`. Then we just have to wrap it. If there is a `Nothing` in any of the input monads, then unwrapping will raise `IsNothing`, which we catch and turn into a `Nothing`.
+The expressions we have in mind will iterate over one value per monad, so the generator expression should only produce a single value. We get that when we ask for `next(expr)`. Then we just have to wrap it. There are times where it is convinient to let the expression return a `Maybe`, though, for example to handle error cases (when we cannot avoid that), so we check if the return value is a `Maybe`, in which case we simply return it, and if it isn't, we lift it with `Some(res)`.
+
+If there is a `Nothing` in any of the input monads, then unwrapping will raise `IsNothing`, which we catch and turn into a `Nothing`.
 
 With the `do` operator we can get close to the syntax we would use if we didn't have any `Nothing` at all, and were just writing Python code. Not quite there, but close enough that it might be worth it, just to not worry about special cases.
 
@@ -653,4 +664,112 @@ def roots(a: float, b: float, c: float) -> Maybe[tuple[float, float]]:
 ```
 
 We still have to extract the problematic bits, inverting `2*a` and taking the square root, because these functions do not know about monads, but the expression in the `do` expression are reasonably readable now.
+
+Since we are wrapping values in a new class, however, we can now also define operators on them. This is a bit cumbersome if you want type checking, and a bit unreliable as well. You can easily write a wrapping function that generates the functions you need, but to annotate them with type information, you need to define the operators manually. At least I haven't found a type checker that can handle other solutions. Still, it is doable.
+
+You want to use protocols to specify which underlying types should support a type. If you just define, say `__add__` on `Maybe[_T]`, you tell the type checkers that *any* `_T` will have a plus operator, and that clearly isn't what you want. But if you define a protocol for, say, arithmetic types
+
+```python
+class Arithmetic(Protocol):
+    """Types that support < comparison."""
+
+    def __neg__(self: Arith, /) -> Arith:
+        """-self."""
+        ...
+
+    def __add__(self: Arith, other: Arith, /) -> Arith:
+        """Add self and other."""
+        ...
+
+    def __sub__(self: Arith, other: Arith, /) -> Arith:
+        """Subtract other from self."""
+        ...
+
+    def __mul__(self: Arith, other: Arith, /) -> Arith:
+        """Multiply self and other."""
+        ...
+
+    def __pow__(self: Arith, other: Arith, /) -> Arith:
+        """Raise self to other."""
+        ...
+
+    def __truediv__(self: Arith, other: Arith, /) -> Arith:
+        """Divide self by other."""
+        ...
+
+    def __floordiv__(self: Arith, other: Arith, /) -> Arith:
+        """Divide self by other."""
+        ...
+
+Arith = TypeVar('Arith', bound=Arithmetic)
+```
+
+you can define that `Maybe[_T]` should support these opoerators when `_T` supports them:
+
+```python
+
+class Maybe(Generic[_T], ABC):
+    """Maybe monad over T."""
+
+    ...
+
+    def __lt__(self: Maybe[Ord], other: Maybe[Ord]) -> Maybe[bool]:
+        """Test less than, if _T is Ord."""
+        return Maybe.do(a < b for a in self for b in other)
+
+    def __neg__(self: Maybe[Arith]) -> Maybe[Arith]:
+        """-self."""
+        return Maybe.do(-a for a in self)
+
+    def __add__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Add, if _T is Arith."""
+        return Maybe.do(a + b for a in self for b in other)
+
+    def __sub__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Add, if _T is Arith."""
+        return Maybe.do(a - b for a in self for b in other)
+
+    def __mul__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Multiply, if _T is Arith."""
+        return Maybe.do(a * b for a in self for b in other)
+
+    def __pow__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Raise self to other."""
+        return Maybe.do(a**b for a in self for b in other)
+
+    def __truediv__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Divide, if _T is Arith."""
+        return Maybe.do(Nothing if b == 0 else Some(a/b)
+                        for a in self for b in other)
+
+    def __floordiv__(self: Maybe[Arith], other: Maybe[Arith]) -> Maybe[Arith]:
+        """Divide, if _T is Arith."""
+        return Maybe.do(Nothing if b == 0 else Some(a//b)
+                        for a in self for b in other)
+```
+
+It *is* annoying to explicitly define all of these, but you only need to do it once.
+
+Unfortunately, and to no surprise, the support for this is dodgy. The `mypy` checker supports this up to a point, it allows you to constraint most arguments with protocols, but it doesn't seem to support constrained `self` types, unless it is a concrete type. It doesn't handle protocols like this, and will think that if we define `__add__` for a `Maybe`, then we support it for any `Maybe[_T]` whether `_T` supports `+` or not. The `pyright` gets it right, though.
+
+Anyway, with the operators in `Maybe`, we can implement the `roots` function like this:
+
+```python
+def sqrt(x: Maybe[float]) -> Maybe[float]:
+    """Compute the square root if x >= 0."""
+    return Maybe.do(
+        Some(math.sqrt(a)) if a >= 0 else Nothing
+        for a in x
+    )
+
+
+def roots(a_: float, b_: float, c_: float
+          ) -> tuple[Maybe[float], Maybe[float]]:
+    """Get the roots of the quadratic equation ax**2 + bx + c."""
+    a, b, c = Some(a_), Some(b_), Some(c_)
+    sq = sqrt(b**Some(2.0) - Some(4.0)*a*c)
+    return ((-b - sq) / (Some(2.0)*a), (-b + sq) / (Some(2.0)*a))
+```
+
+We are getting closer to how we would write the code in plain Python without any error handling. The `Some(-)` wrapping is the only thing that distinguishes this from working with plain `float`, and if you work at little more at the operators you can make them accept more types. You can't dispatch on type, so you need to explicitly check the types, but that is all you would need. I'm just too lazy for that right now.
 
